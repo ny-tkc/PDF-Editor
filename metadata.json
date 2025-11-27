@@ -1,0 +1,5 @@
+{
+  "name": "PDF Master Studio",
+  "description": "高度なPDF編集ツール。結合、ページ削除、回転、注釈（テキスト、赤枠、矢印）の追加が可能。日本語UI対応。",
+  "requestFramePermissions": []
+}
