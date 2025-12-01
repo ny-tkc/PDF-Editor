@@ -20,6 +20,15 @@
                 600: '#0284c7',
                 700: '#0369a1',
               }
+            },
+            animation: {
+              'bounce-in': 'bounceIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
+            },
+            keyframes: {
+              bounceIn: {
+                '0%': { transform: 'translate(-50%, 100%)', opacity: 0 },
+                '100%': { transform: 'translate(-50%, 0)', opacity: 1 },
+              }
             }
           }
         }
@@ -38,11 +47,38 @@
     <script crossorigin="anonymous" src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script crossorigin="anonymous" src="https://unpkg.com/downloadjs@1.4.7/download.min.js"></script>
 
+    <script>
+      // PDF.js worker setup
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+
     <style>
       ::-webkit-scrollbar { width: 8px; height: 8px; }
       ::-webkit-scrollbar-track { background: #f1f5f9; }
       ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      
+      .textLayer {
+        position: absolute;
+        left: 0;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        overflow: hidden;
+        opacity: 0.2;
+        line-height: 1.0;
+        pointer-events: auto;
+      }
+      .textLayer span {
+        color: transparent;
+        position: absolute;
+        white-space: pre;
+        cursor: text;
+        transform-origin: 0% 0%;
+      }
+      ::selection {
+        background: rgba(14, 165, 233, 0.3);
+      }
     </style>
   <link rel="stylesheet" href="/index.css">
 </head>
@@ -100,14 +136,23 @@
         Hash: createIcon(<><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></>),
         MessageSquare: createIcon(<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>),
         FolderPlus: createIcon(<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>),
-    };
+        LayoutGrid: createIcon(<><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></>),
+        Layers: createIcon(<><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></>),
+        Columns: createIcon(<path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7m0-18H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7m0-18v18"></path>),
+        ChevronLeft: createIcon(<polyline points="15 18 9 12 15 6"></polyline>),
+        ChevronRight: createIcon(<polyline points="9 18 15 12 9 6"></polyline>),
+        ChevronsLeft: createIcon(<><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></>),
+        ChevronsRight: createIcon(<><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></>),
+      };
     
       const { 
         X, Square, FilledSquare, Circle, ArrowRight, Type, Move, Check, Highlighter, 
         ImageIcon, ZoomIn, ZoomOut, Bold, 
         Upload, FileDown, Trash2, RotateCw, Edit3, Copy, Plus, 
         ArrowUpDown, ArrowLeftRight, RefreshCcw, Shapes,
-        Hash, MessageSquare, FolderPlus
+        Hash, MessageSquare, FolderPlus,
+        LayoutGrid, Layers, Columns,
+        ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
       } = Icons;
 
       const generateId = () => {
@@ -213,8 +258,8 @@
             pageIndex: i,
             rotation: 0,
             thumbnailUrl: canvas.toDataURL(),
-            originalWidth: viewport.width, // Store the higher res dimension
-            originalHeight: viewport.height,
+            originalWidth: viewport.width / 2.0, // Normalize to scale 1.0
+            originalHeight: viewport.height / 2.0,
             annotations: []
           });
         }
@@ -239,13 +284,15 @@
           copiedPage.setRotation(PDFLib.degrees(currentRotation + pageData.rotation));
 
           if (pageData.annotations.length > 0) {
-            const canvas = document.createElement('canvas');
             const width = pageData.originalWidth;
             const height = pageData.originalHeight;
             
+            // Create a canvas with the original dimensions (1:1 scale with PDF points)
+            const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
+
             if (ctx) {
               ctx.textBaseline = 'top'; 
 
@@ -379,6 +426,7 @@
               const pngImageBytes = await fetch(canvas.toDataURL('image/png')).then(res => res.arrayBuffer());
               const pngImage = await mergedPdf.embedPng(pngImageBytes);
               
+              // Draw the annotation layer on top of the existing page
               copiedPage.drawImage(pngImage, {
                 x: 0,
                 y: 0,
@@ -406,15 +454,17 @@
           canvas.width = viewport.width;
 
           await page.render({ canvasContext: context, viewport: viewport }).promise;
-          return canvas.toDataURL();
+          
+          const textContent = await page.getTextContent();
+          
+          return { dataUrl: canvas.toDataURL(), textContent, viewport };
       };
 
       // --- COMPONENTS ---
 
-      const AnnotationEditor = ({ page, imageSrc, onClose, onSave }) => {
+      const AnnotationEditor = ({ page, imageSrc, textContent, viewportInfo, onClose, onSave }) => {
         const [annotations, setAnnotations] = useState(page.annotations || []);
         const [tool, setTool] = useState('select');
-        const [subTool, setSubTool] = useState(null); 
         const [showShapeMenu, setShowShapeMenu] = useState(false);
         const [showTextMenu, setShowTextMenu] = useState(false);
         
@@ -437,9 +487,14 @@
         const [interactionStartPos, setInteractionStartPos] = useState({ x: 0, y: 0 });
         const [initialAnnState, setInitialAnnState] = useState(null);
         
+        // Text Selection
+        const [textSelection, setTextSelection] = useState(null); 
+        
         const imgRef = useRef(null);
         const containerRef = useRef(null);
         const fileInputRef = useRef(null);
+        
+        const initialAnnotationsStr = useRef(JSON.stringify(page.annotations || []));
 
         const fitWidth = () => {
           if (containerRef.current) {
@@ -457,6 +512,78 @@
         
         useEffect(() => {
            fitHeight();
+        }, []);
+        
+        const handleClose = () => {
+             const currentStr = JSON.stringify(annotations);
+             if (currentStr !== initialAnnotationsStr.current) {
+                 if (!confirm("変更内容が保存されていません。破棄してもよろしいですか？")) {
+                     return;
+                 }
+             }
+             onClose();
+        };
+
+        const handleTextSelection = () => {
+            const selection = window.getSelection();
+            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+                setTextSelection(null);
+                return;
+            }
+            
+            const range = selection.getRangeAt(0);
+            const rects = range.getClientRects();
+            const containerRect = imgRef.current.getBoundingClientRect();
+            
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            let hasOverlap = false;
+
+            for (let i = 0; i < rects.length; i++) {
+                const rect = rects[i];
+                if (rect.right > containerRect.left && rect.left < containerRect.right && 
+                    rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+                        minX = Math.min(minX, rect.left - containerRect.left);
+                        minY = Math.min(minY, rect.top - containerRect.top);
+                        maxX = Math.max(maxX, rect.right - containerRect.left);
+                        maxY = Math.max(maxY, rect.bottom - containerRect.left);
+                        hasOverlap = true;
+                }
+            }
+
+            if (hasOverlap) {
+                const scaleX = page.originalWidth / containerRect.width;
+                const scaleY = page.originalHeight / containerRect.height;
+                
+                setTextSelection({
+                    x: minX * scaleX,
+                    y: minY * scaleY,
+                    width: (maxX - minX) * scaleX,
+                    height: (maxY - minY) * scaleY
+                });
+            } else {
+                setTextSelection(null);
+            }
+        };
+        
+        const applyTextHighlight = () => {
+            if (!textSelection) return;
+            const newAnn = {
+                 id: generateId(),
+                 type: 'highlight',
+                 x: textSelection.x,
+                 y: textSelection.y,
+                 width: textSelection.width,
+                 height: textSelection.height,
+                 color: '#ffff00'
+            };
+            setAnnotations([...annotations, newAnn]);
+            setTextSelection(null);
+            window.getSelection().removeAllRanges();
+        };
+
+        useEffect(() => {
+            document.addEventListener('selectionchange', handleTextSelection);
+            return () => document.removeEventListener('selectionchange', handleTextSelection);
         }, []);
 
         useEffect(() => {
@@ -482,7 +609,7 @@
         useEffect(() => {
             const handleKeyDown = (e) => {
                 if (!selectedId) return;
-                const step = e.shiftKey ? 10 : 2;
+                const step = e.shiftKey ? 50 : 10;
                 let dx = 0; let dy = 0;
                 switch(e.key) {
                     case 'ArrowUp': dy = -step; break;
@@ -537,6 +664,8 @@
         };
 
         const handleMouseDown = (e) => {
+          if (e.target.closest('button') || e.target.closest('.cursor-nw-resize')) return;
+          
           if (interactionMode !== 'none') return;
           if (tool === 'select') { setSelectedId(null); return; }
           
@@ -561,7 +690,6 @@
                };
                setAnnotations([...annotations, newAnn]);
                setSelectedId(newAnn.id); 
-               setTool('select');
              }
              setIsDrawing(false);
           } else if (tool === 'image') {
@@ -594,10 +722,23 @@
               setAnnotations(prev => prev.map(ann => {
                   if (ann.id !== selectedId) return ann;
                   
-                  if (ann.type === 'text') {
-                       const scaleFactor = 1 + (dy / 100); 
+                  if (['text','callout','calloutCircle'].includes(ann.type)) {
+                       // Scale font size based on resize factor (using height difference as proxy)
+                       const scaleFactor = 1 + (dy / (initialAnnState.height || 100)); 
                        const newSize = Math.max(10, initialAnnState.fontSize * scaleFactor);
-                       return { ...ann, fontSize: newSize };
+                       
+                       let newW = initialAnnState.width || 0;
+                       let newH = initialAnnState.height || 0;
+                       
+                       // For callouts, also scale the box
+                       if (ann.type !== 'text') {
+                          if (resizeHandle.includes('e')) newW += dx;
+                          if (resizeHandle.includes('w')) { /* ... */ newW -= dx; } // Simplify horizontal scaling for now
+                          if (resizeHandle.includes('s')) newH += dy;
+                          if (resizeHandle.includes('n')) { /* ... */ newH -= dy; }
+                       }
+
+                       return { ...ann, fontSize: newSize, width: newW, height: newH };
                   }
 
                   let newX = initialAnnState.x;
@@ -654,6 +795,7 @@
                color: currentAnnotation.color,
              };
              setAnnotations([...annotations, newAnn]);
+             setSelectedId(newAnn.id); // Immediate select to allow moving
           }
           setCurrentAnnotation(null);
         };
@@ -675,6 +817,7 @@
                      }
                      
                      ctx.save();
+                     // Render Logic duplicated from generateFinalPDF for consistency
                      if (ann.type === 'highlight') {
                          ctx.fillStyle = ann.color; ctx.globalAlpha = 0.4; ctx.fillRect(x,y,w,h);
                      } else if (ann.type === 'rect') {
@@ -800,6 +943,7 @@
 
            const renderContent = () => {
                if (ann.type === 'arrow') {
+                   // Arrow rendering logic
                    const globalStartX = ann.x; const globalStartY = ann.y;
                    const globalEndX = ann.x + ann.width; const globalEndY = ann.y + ann.height;
                    const minX = Math.min(globalStartX, globalEndX); const minY = Math.min(globalStartY, globalEndY);
@@ -872,6 +1016,13 @@
                           setInteractionMode('moving');
                           setInteractionStartPos(getPointerPos(e));
                           setInitialAnnState({...ann});
+                          
+                          // SYNC TOOLBAR ON SELECT
+                          if (['text','callout','calloutCircle'].includes(ann.type)) {
+                              setFontSize(ann.fontSize || 32);
+                              setIsBold(ann.fontWeight === 'bold');
+                              setFontFamily(ann.fontFamily || 'Meiryo UI');
+                          }
                           if (ann.type !== 'image') setColor(ann.color);
                       }
                   }}>
@@ -911,14 +1062,14 @@
                            <option value="sans-serif">ゴシック体</option>
                            <option value="serif">明朝体</option>
                        </select>
-                       <input type="number" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} className="w-16 border border-slate-300 rounded px-1 py-0.5 text-sm" />
+                       <input type="number" step="4" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} className="w-16 border border-slate-300 rounded px-1 py-0.5 text-sm" />
                        <button onClick={() => setIsBold(!isBold)} className={`p-1 rounded ${isBold ? 'bg-brand-100 text-brand-600 border border-brand-200' : 'text-slate-500 hover:bg-slate-100'}`}><Bold size={16} /></button>
                    </div>
                    
                    <button onClick={handleClipboardCopy} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="画像をコピー"><Copy size={20} /></button>
                    <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 px-3 text-sm text-slate-600 font-mono">{Math.round(zoom * 100)}%</div>
                    <div className="flex gap-2 ml-4">
-                      <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium">キャンセル</button>
+                      <button onClick={handleClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium">キャンセル</button>
                       <button onClick={() => onSave(annotations)} className="px-6 py-2 bg-brand-600 text-white rounded shadow-sm hover:bg-brand-700 font-bold flex items-center gap-2 text-sm"><Check size={18} /> 完了</button>
                   </div>
               </div>
@@ -984,6 +1135,44 @@
               <div className="flex-1 bg-slate-500 overflow-auto relative flex items-center justify-center p-8" ref={containerRef}>
                    <div className="relative bg-white shadow-2xl origin-center" style={{ width: page.originalWidth * zoom, height: page.originalHeight * zoom }}>
                         <img ref={imgRef} src={imageSrc} className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" draggable={false} />
+                        
+                        {textContent && (
+                            <div className="textLayer" style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
+                                {textContent.items.map((item, i) => {
+                                    const tx = item.transform;
+                                    const fontSize = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1]);
+                                    const left = tx[4]; 
+                                    const bottom = tx[5]; 
+                                    const top = page.originalHeight - bottom - item.height; 
+                                    return (
+                                        <span key={i} style={{
+                                            left: left + 'px',
+                                            top: (page.originalHeight - bottom - (item.height || fontSize)) + 'px', 
+                                            fontSize: fontSize + 'px',
+                                            fontFamily: item.fontName,
+                                            transform: `scale(1, 1)` 
+                                        }}>
+                                            {item.str}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {textSelection && (
+                             <button 
+                                 className="absolute bg-brand-600 text-white px-3 py-1 rounded shadow-lg z-50 flex items-center gap-2 animate-bounce-in text-sm font-bold"
+                                 style={{ 
+                                     left: textSelection.x + textSelection.width/2, 
+                                     top: textSelection.y - 40,
+                                     transform: 'translateX(-50%)'
+                                 }}
+                                 onClick={applyTextHighlight}
+                             >
+                                 <Highlighter size={14} /> マーカーを引く
+                             </button>
+                        )}
+
                         <div className="absolute inset-0 z-10" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}>
                             {annotations.map(ann => renderAnnotation(ann))}
                             {currentAnnotation && renderAnnotation(currentAnnotation, true)}
@@ -1017,10 +1206,16 @@
         const [isDraggingFile, setIsDraggingFile] = useState(false);
         const [editorPage, setEditorPage] = useState(null);
         const [draggedPageIndex, setDraggedPageIndex] = useState(null);
+        const [dropTargetIndex, setDropTargetIndex] = useState(null);
         const [showPageNumModal, setShowPageNumModal] = useState(false);
         const [pageNumMode, setPageNumMode] = useState('none'); 
+        
+        // View Mode
+        const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'stack' | 'carousel'
+        const [focusedPageIndex, setFocusedPageIndex] = useState(0);
 
         const fileInputRef = useRef(null);
+        const carouselRef = useRef(null);
 
         const processFiles = useCallback(async (files, isPaste = false) => {
           if (files.length === 0) return;
@@ -1042,8 +1237,8 @@
               setPages(updatedPages);
               
               if (isPaste && lastAddedPage && lastAddedSource) {
-                   const url = await renderHighResPage(lastAddedPage, lastAddedSource);
-                   setEditorPage({ page: lastAddedPage, highResUrl: url });
+                   const res = await renderHighResPage(lastAddedPage, lastAddedSource);
+                   setEditorPage({ page: lastAddedPage, highResUrl: res.dataUrl, textContent: res.textContent, viewportInfo: res.viewport });
               }
           } catch (e) { alert("エラーが発生しました。"); } finally { setIsProcessing(false); }
         }, [pages, sources, pageNumMode]);
@@ -1084,6 +1279,7 @@
 
         const handlePageDrop = (e, dropIndex) => {
             e.preventDefault(); e.stopPropagation(); 
+            setDropTargetIndex(null);
             if (draggedPageIndex === null || draggedPageIndex === dropIndex) return;
             const newPages = [...pages];
             const item = newPages.splice(draggedPageIndex, 1)[0];
@@ -1110,7 +1306,6 @@
                      await writable.write(pdfBytes);
                      await writable.close();
                  } catch (e) {
-                     // Fallback if cancelled or error
                      if (e.name !== 'AbortError') download(pdfBytes, suggestedName, "application/pdf");
                  }
              } else {
@@ -1135,14 +1330,15 @@
                 setSources(new Map());
                 setSelectedPageIds(new Set());
                 setPageNumMode('none');
+                setFocusedPageIndex(0);
             }
         };
 
         const handleEditPage = async (page) => {
            const source = sources.get(page.sourcePdfId);
            if (!source) return;
-           const url = await renderHighResPage(page, source);
-           setEditorPage({ page, highResUrl: url });
+           const res = await renderHighResPage(page, source);
+           setEditorPage({ page, highResUrl: res.dataUrl, textContent: res.textContent, viewportInfo: res.viewport });
         };
 
         const handleSaveAnnotation = (newAnnotations) => {
@@ -1159,10 +1355,103 @@
            return () => window.removeEventListener('paste', handlePaste);
         }, [processFiles]);
 
+        // Keyboard & Scroll Sync
+        useEffect(() => {
+            const handleKey = (e) => {
+                // allow grid nav too
+                if (e.key === 'ArrowLeft') {
+                    setFocusedPageIndex(prev => Math.max(0, prev - 1));
+                } else if (e.key === 'ArrowRight') {
+                    setFocusedPageIndex(prev => Math.min(pages.length - 1, prev + 1));
+                }
+            };
+            window.addEventListener('keydown', handleKey);
+            return () => window.removeEventListener('keydown', handleKey);
+        }, [pages.length]);
+
+        // Carousel Scroll Effect
+        useEffect(() => {
+            if (viewMode === 'carousel' && carouselRef.current) {
+                const container = carouselRef.current;
+                const cardWidth = 332; // 300 + gap
+                const targetScroll = focusedPageIndex * cardWidth - (container.clientWidth / 2) + (300 / 2);
+                container.scrollTo({ left: targetScroll, behavior: 'smooth' });
+            }
+        }, [focusedPageIndex, viewMode]);
+
+        const renderThumbContent = (page, index) => (
+             <div key={page.id} 
+                className={`relative group bg-white rounded-lg shadow-sm border-2 transition-all duration-200 ${selectedPageIds.has(page.id) || focusedPageIndex === index ? 'border-brand-500 ring-2 ring-brand-100' : 'border-transparent hover:border-brand-200'}`}
+                draggable
+                onDragStart={() => setDraggedPageIndex(index)}
+                onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(index); }}
+                onDrop={(e) => handlePageDrop(e, index)}
+                onClick={() => setFocusedPageIndex(index)}
+             >
+                {/* Visual Insertion Marker */}
+                {draggedPageIndex !== null && dropTargetIndex === index && (
+                    <div className={`absolute z-30 w-1.5 bg-brand-500 rounded-full h-full -left-4 ${draggedPageIndex < index ? 'left-auto -right-4' : ''}`}></div>
+                )}
+
+                {/* Selection Checkbox */}
+                <div className="absolute top-2 left-2 z-10" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedPageIds.has(page.id)} onChange={() => {
+                    const newSet = new Set(selectedPageIds);
+                    if (newSet.has(page.id)) newSet.delete(page.id); else newSet.add(page.id);
+                    setSelectedPageIds(newSet);
+                    }} className="w-5 h-5 rounded border-slate-300 text-brand-600 focus:ring-brand-500 shadow-sm cursor-pointer" />
+                </div>
+
+                {/* Page Number Badge */}
+                <div className="absolute top-2 right-2 z-10 bg-slate-900/70 text-white text-xs px-2 py-0.5 rounded-full backdrop-blur-sm font-mono">
+                    {index + 1}
+                </div>
+
+                {/* Thumbnail */}
+                <div className="aspect-[1/1.414] w-full overflow-hidden rounded-t-lg bg-slate-100 relative cursor-pointer" onClick={(e) => { e.stopPropagation(); handleEditPage(page); }}>
+                    <img src={page.thumbnailUrl} className="w-full h-full object-contain" />
+                    <div className="absolute inset-0 pointer-events-none">
+                        {page.annotations.map(ann => {
+                            const style = {
+                            position: 'absolute',
+                            left: `${(ann.x / page.originalWidth) * 100}%`,
+                            top: `${(ann.y / page.originalHeight) * 100}%`,
+                            width: ann.width ? `${(ann.width / page.originalWidth) * 100}%` : 'auto',
+                            height: ann.height ? `${(ann.height / page.originalHeight) * 100}%` : 'auto',
+                            };
+                            if(ann.type === 'highlight') return <div key={ann.id} style={{...style, backgroundColor: ann.color, opacity: 0.4}} />;
+                            if(ann.type === 'rect') return <div key={ann.id} style={{...style, border: `2px solid ${ann.color}`}} />;
+                            if(ann.type === 'circle') return <div key={ann.id} style={{...style, border: `2px solid ${ann.color}`, borderRadius: '50%'}} />;
+                            if(ann.type === 'cross') return <div key={ann.id} style={{...style, color: ann.color}}>X</div>; 
+                            if(ann.type === 'arrow') return <div key={ann.id} style={{...style, height:'2px', backgroundColor:ann.color, transformOrigin:'0 0', width:`${Math.sqrt(ann.width**2 + ann.height**2)/page.originalWidth*100}%`, transform:`rotate(${Math.atan2(ann.height, ann.width)}rad)`}} />;
+                            if(ann.type === 'text' || ann.type === 'callout' || ann.type === 'calloutCircle') return <div key={ann.id} style={{...style, fontSize:'8px', color: ann.color}}>{ann.text}</div>;
+                            if(ann.type === 'image') return <img key={ann.id} src={ann.imageData} style={{...style, objectFit:'contain'}} />;
+                            return null;
+                        })}
+                    </div>
+                    
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                        <div className="bg-white/90 text-brand-700 px-3 py-1 rounded-full shadow-sm text-sm font-medium flex items-center gap-1">
+                            <Edit3 size={14} /> 編集
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer Actions */}
+                <div className="p-2 border-t border-slate-100 flex justify-around bg-slate-50 rounded-b-lg">
+                    <button onClick={(e) => { e.stopPropagation(); setPages(pages.map(p => p.id === page.id ? { ...p, rotation: (p.rotation + 90) % 360 } : p)); }} className="p-1.5 text-slate-500 hover:text-brand-600 hover:bg-white rounded transition-colors" title="回転">
+                    <RotateCw size={16} />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); if(confirm('削除しますか？')) { const newP = pages.filter(p => p.id !== page.id); setPages(applyPageNumbers(newP, pageNumMode)); } }} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-white rounded transition-colors" title="削除">
+                    <Trash2 size={16} />
+                    </button>
+                </div>
+            </div>
+        );
+
         return (
           <div className="min-h-screen flex flex-col" onDragOver={(e) => { 
               e.preventDefault(); 
-              // Check if dragging files, not internal elements
               if (e.dataTransfer.types.includes('Files')) setIsDraggingFile(true);
           }} onDragLeave={() => setIsDraggingFile(false)} onDrop={(e) => { 
               e.preventDefault(); 
@@ -1181,7 +1470,14 @@
                  <h1 className="text-xl font-bold text-slate-800 tracking-tight">PDF Master Studio</h1>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-3 items-center">
+                 {/* View Mode Toggles */}
+                 <div className="flex bg-slate-100 rounded-lg p-1 mr-4">
+                     <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="グリッド表示"><LayoutGrid size={18} /></button>
+                     <button onClick={() => setViewMode('stack')} className={`p-1.5 rounded ${viewMode === 'stack' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="スタック表示"><Layers size={18} /></button>
+                     <button onClick={() => setViewMode('carousel')} className={`p-1.5 rounded ${viewMode === 'carousel' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="カルーセル表示"><Columns size={18} /></button>
+                 </div>
+
                  <button onClick={handleReset} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg border border-transparent hover:border-slate-200 transition-all" title="新規プロジェクト/リセット"><Trash2 size={20} /></button>
                  <div className="w-px h-8 bg-slate-300 mx-1"></div>
                  
@@ -1201,81 +1497,100 @@
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 p-8 overflow-y-auto">
+            <div className="flex-1 p-8 overflow-y-auto bg-slate-50/50">
                {pages.length === 0 ? (
-                 <div className="h-full flex flex-col items-center justify-center text-slate-400 border-4 border-dashed border-slate-200 rounded-2xl p-12 bg-slate-50/50">
+                 <div className="h-full flex flex-col items-center justify-center text-slate-400 border-4 border-dashed border-slate-200 rounded-2xl p-12 bg-white">
                     <Upload size={64} className="mb-6 text-brand-200" />
                     <p className="text-xl font-medium text-slate-600">PDFまたは画像をここにドラッグ＆ドロップ</p>
                     <p className="mt-2 text-slate-400">または「ファイル追加」ボタンから選択</p>
                  </div>
                ) : (
-                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 pb-20">
-                    {pages.map((page, index) => (
-                       <div key={page.id} 
-                            className={`relative group bg-white rounded-lg shadow-sm border-2 transition-all duration-200 ${selectedPageIds.has(page.id) ? 'border-brand-500 ring-2 ring-brand-100' : 'border-transparent hover:border-brand-200'}`}
-                            draggable
-                            onDragStart={() => setDraggedPageIndex(index)}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => handlePageDrop(e, index)}
-                       >
-                          {/* Selection Checkbox */}
-                          <div className="absolute top-2 left-2 z-10" onClick={(e) => e.stopPropagation()}>
-                             <input type="checkbox" checked={selectedPageIds.has(page.id)} onChange={() => {
-                                const newSet = new Set(selectedPageIds);
-                                if (newSet.has(page.id)) newSet.delete(page.id); else newSet.add(page.id);
-                                setSelectedPageIds(newSet);
-                             }} className="w-5 h-5 rounded border-slate-300 text-brand-600 focus:ring-brand-500 shadow-sm cursor-pointer" />
-                          </div>
+                 <>
+                    {/* Grid View */}
+                    {viewMode === 'grid' && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 pb-20">
+                            {pages.map((page, index) => renderThumbContent(page, index))}
+                        </div>
+                    )}
 
-                          {/* Page Number Badge */}
-                          <div className="absolute top-2 right-2 z-10 bg-slate-900/70 text-white text-xs px-2 py-0.5 rounded-full backdrop-blur-sm font-mono">
-                             {index + 1}
-                          </div>
+                    {/* Stack View */}
+                    {viewMode === 'stack' && (
+                        <div className="flex flex-col justify-center items-center h-full relative">
+                            <div className="relative w-full flex-1 flex justify-center items-center" onClick={() => setFocusedPageIndex((f) => (f + 1) % pages.length)}>
+                                {pages.map((page, index) => {
+                                    const offset = index - focusedPageIndex;
+                                    if (offset < 0) return null; 
+                                    if (offset > 5) return null; 
+                                    return (
+                                        <div key={page.id} className="absolute transition-all duration-300 ease-out shadow-2xl rounded-lg bg-white overflow-hidden border border-slate-200" 
+                                             style={{ 
+                                                 zIndex: 50 - offset, 
+                                                 transform: `scale(${1 - offset * 0.05}) translateY(${offset * 20}px)`,
+                                                 opacity: 1 - offset * 0.15,
+                                                 width: '400px'
+                                             }}>
+                                             <div className="relative pointer-events-none">
+                                                <img src={page.thumbnailUrl} className="w-full" />
+                                                {index === focusedPageIndex && (
+                                                    <div className="absolute top-2 right-2 bg-brand-600 text-white px-3 py-1 rounded-full text-sm font-bold shadow-lg">
+                                                        Page {index + 1}
+                                                    </div>
+                                                )}
+                                             </div>
+                                             {index === focusedPageIndex && (
+                                                 <div className="p-4 bg-white border-t flex justify-center">
+                                                     <button onClick={(e) => { e.stopPropagation(); handleEditPage(page); }} className="px-6 py-2 bg-brand-600 text-white rounded-lg font-bold shadow hover:bg-brand-700">編集する</button>
+                                                 </div>
+                                             )}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                            
+                            {/* Stack Navigation Controls */}
+                            <div className="bg-white p-2 rounded-full shadow-lg border border-slate-200 flex gap-2 mb-8 z-50">
+                                <button onClick={() => setFocusedPageIndex(0)} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="最初へ"><ChevronsLeft size={20} /></button>
+                                <button onClick={() => setFocusedPageIndex(p => Math.max(0, p - 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="前へ"><ChevronLeft size={20} /></button>
+                                <span className="px-3 py-2 font-mono text-slate-700 min-w-[60px] text-center">{focusedPageIndex + 1} / {pages.length}</span>
+                                <button onClick={() => setFocusedPageIndex(p => Math.min(pages.length - 1, p + 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="次へ"><ChevronRight size={20} /></button>
+                                <button onClick={() => setFocusedPageIndex(pages.length - 1)} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="最後へ"><ChevronsRight size={20} /></button>
+                            </div>
+                        </div>
+                    )}
 
-                          {/* Thumbnail */}
-                          <div className="aspect-[1/1.414] w-full overflow-hidden rounded-t-lg bg-slate-100 relative cursor-pointer" onClick={() => handleEditPage(page)}>
-                             <img src={page.thumbnailUrl} className="w-full h-full object-contain" />
-                             {/* Annotation Preview Overlay */}
-                             <div className="absolute inset-0 pointer-events-none">
-                                 {page.annotations.map(ann => {
-                                     // Simplified render for preview
-                                     const style = {
-                                        position: 'absolute',
-                                        left: `${(ann.x / page.originalWidth) * 100}%`,
-                                        top: `${(ann.y / page.originalHeight) * 100}%`,
-                                        width: ann.width ? `${(ann.width / page.originalWidth) * 100}%` : 'auto',
-                                        height: ann.height ? `${(ann.height / page.originalHeight) * 100}%` : 'auto',
-                                     };
-                                     if(ann.type === 'highlight') return <div key={ann.id} style={{...style, backgroundColor: ann.color, opacity: 0.4}} />;
-                                     if(ann.type === 'rect') return <div key={ann.id} style={{...style, border: `2px solid ${ann.color}`}} />;
-                                     if(ann.type === 'circle') return <div key={ann.id} style={{...style, border: `2px solid ${ann.color}`, borderRadius: '50%'}} />;
-                                     if(ann.type === 'cross') return <div key={ann.id} style={{...style, color: ann.color}}>X</div>; 
-                                     if(ann.type === 'arrow') return <div key={ann.id} style={{...style, height:'2px', backgroundColor:ann.color, transformOrigin:'0 0', width:`${Math.sqrt(ann.width**2 + ann.height**2)/page.originalWidth*100}%`, transform:`rotate(${Math.atan2(ann.height, ann.width)}rad)`}} />;
-                                     if(ann.type === 'text' || ann.type === 'callout' || ann.type === 'calloutCircle') return <div key={ann.id} style={{...style, fontSize:'8px', color: ann.color}}>{ann.text}</div>;
-                                     if(ann.type === 'image') return <img key={ann.id} src={ann.imageData} style={{...style, objectFit:'contain'}} />;
-                                     return null;
-                                 })}
-                             </div>
-                             
-                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                 <div className="bg-white/90 text-brand-700 px-3 py-1 rounded-full shadow-sm text-sm font-medium flex items-center gap-1">
-                                     <Edit3 size={14} /> 編集
-                                 </div>
-                             </div>
-                          </div>
-
-                          {/* Footer Actions */}
-                          <div className="p-2 border-t border-slate-100 flex justify-around bg-slate-50 rounded-b-lg">
-                             <button onClick={(e) => { e.stopPropagation(); setPages(pages.map(p => p.id === page.id ? { ...p, rotation: (p.rotation + 90) % 360 } : p)); }} className="p-1.5 text-slate-500 hover:text-brand-600 hover:bg-white rounded transition-colors" title="回転">
-                                <RotateCw size={16} />
-                             </button>
-                             <button onClick={(e) => { e.stopPropagation(); if(confirm('削除しますか？')) { const newP = pages.filter(p => p.id !== page.id); setPages(applyPageNumbers(newP, pageNumMode)); } }} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-white rounded transition-colors" title="削除">
-                                <Trash2 size={16} />
-                             </button>
-                          </div>
-                       </div>
-                    ))}
-                 </div>
+                    {/* Carousel View */}
+                    {viewMode === 'carousel' && (
+                        <div className="flex flex-col h-full">
+                            <div className="flex items-center gap-8 overflow-x-auto h-full px-20 snap-x" ref={carouselRef}>
+                                {pages.map((page, index) => {
+                                    const isFocused = index === focusedPageIndex;
+                                    return (
+                                        <div key={page.id} className={`snap-center shrink-0 transition-all duration-300 ${isFocused ? 'scale-110 z-10 shadow-2xl ring-4 ring-brand-100' : 'scale-90 opacity-60 grayscale'}`}
+                                            style={{ width: '300px' }}
+                                            onClick={() => setFocusedPageIndex(index)}>
+                                            <div className="bg-white rounded-lg overflow-hidden">
+                                                <img src={page.thumbnailUrl} className="w-full" />
+                                                {isFocused && (
+                                                    <div className="p-3 border-t bg-slate-50 flex justify-center">
+                                                        <button onClick={(e) => { e.stopPropagation(); handleEditPage(page); }} className="flex items-center gap-2 text-brand-700 font-bold hover:bg-brand-50 px-3 py-1 rounded"><Edit3 size={16}/> 編集</button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            {/* Carousel Navigation Controls */}
+                            <div className="flex justify-center pb-6">
+                                <div className="bg-white p-2 rounded-full shadow-lg border border-slate-200 flex gap-2">
+                                    <button onClick={() => setFocusedPageIndex(p => Math.max(0, p - 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600"><ChevronLeft size={20} /></button>
+                                    <span className="px-3 py-2 font-mono text-slate-700">{focusedPageIndex + 1} / {pages.length}</span>
+                                    <button onClick={() => setFocusedPageIndex(p => Math.min(pages.length - 1, p + 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600"><ChevronRight size={20} /></button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                 </>
                )}
             </div>
 
@@ -1305,6 +1620,8 @@
                <AnnotationEditor 
                   page={editorPage.page} 
                   imageSrc={editorPage.highResUrl} 
+                  textContent={editorPage.textContent}
+                  viewportInfo={editorPage.viewportInfo}
                   onClose={() => setEditorPage(null)} 
                   onSave={handleSaveAnnotation} 
                />
