@@ -143,6 +143,8 @@
         ChevronRight: createIcon(<polyline points="9 18 15 12 9 6"></polyline>),
         ChevronsLeft: createIcon(<><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></>),
         ChevronsRight: createIcon(<><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></>),
+        Undo: createIcon(<><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></>),
+        Redo: createIcon(<><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 3.7"/></>),
       };
     
       const { 
@@ -152,7 +154,8 @@
         ArrowUpDown, ArrowLeftRight, RefreshCcw, Shapes,
         Hash, MessageSquare, FolderPlus,
         LayoutGrid, Layers, Columns,
-        ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+        ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+        Undo, Redo
       } = Icons;
 
       const generateId = () => {
@@ -166,39 +169,72 @@
       };
 
       // --- UTILS ---
-      const getBubblePath = (x, y, w, h, tail, type) => {
+      const getBubblePathStr = (x, y, w, h, tail, type) => {
         const tx = x + tail.x;
         const ty = y + tail.y;
-        
-        let path = new Path2D();
         
         if (type === 'calloutCircle') {
            const cx = x + w/2;
            const cy = y + h/2;
            const rx = Math.abs(w)/2;
            const ry = Math.abs(h)/2;
-           path.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
-           path.moveTo(cx + rx * 0.5, cy + ry * 0.8);
-           path.lineTo(tx, ty);
-           path.lineTo(cx - rx * 0.2, cy + ry * 0.8);
+           // Determine attachment point (simple ray casting)
+           const angle = Math.atan2(ty - cy, tx - cx);
+           const px = cx + Math.cos(angle) * rx;
+           const py = cy + Math.sin(angle) * ry;
+           const px2 = cx + Math.cos(angle + 0.2) * rx;
+           const py2 = cy + Math.sin(angle + 0.2) * ry;
+           const px3 = cx + Math.cos(angle - 0.2) * rx;
+           const py3 = cy + Math.sin(angle - 0.2) * ry;
+
+           let d = `M ${cx+rx} ${cy} A ${rx} ${ry} 0 1 1 ${cx-rx} ${cy} A ${rx} ${ry} 0 1 1 ${cx+rx} ${cy}`;
+           // Add tail triangle
+           d += ` M ${px2} ${py2} L ${tx} ${ty} L ${px3} ${py3}`;
+           return d;
         } else {
            const r = 10;
-           const bx = x; const by = y; const bw = w; const bh = h;
-           path.moveTo(bx + r, by);
-           path.lineTo(bx + bw - r, by);
-           path.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
-           path.lineTo(bx + bw, by + bh - r);
-           path.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
-           path.lineTo(bx + bw * 0.7, by + bh);
-           path.lineTo(tx, ty);
-           path.lineTo(bx + bw * 0.4, by + bh);
-           path.lineTo(bx + r, by + bh);
-           path.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
-           path.lineTo(bx, by + r);
-           path.quadraticCurveTo(bx, by, bx + r, by);
+           // 4-sector logic for rectangular callout
+           const cx = x + w/2; 
+           const cy = y + h/2;
+           const dx = tx - cx; 
+           const dy = ty - cy;
+           
+           let sector = 'bottom';
+           // normalize to aspect ratio
+           if (Math.abs(dx) * h > Math.abs(dy) * w) {
+              sector = dx > 0 ? 'right' : 'left';
+           } else {
+              sector = dy > 0 ? 'bottom' : 'top';
+           }
+
+           let d = `M ${x + r} ${y} L ${x + w - r} ${y} Q ${x + w} ${y} ${x + w} ${y + r}`;
+           
+           // Right edge
+           if (sector === 'right') {
+              d += ` L ${x + w} ${y + h/2 - 10} L ${tx} ${ty} L ${x + w} ${y + h/2 + 10}`;
+           }
+           d += ` L ${x + w} ${y + h - r} Q ${x + w} ${y + h} ${x + w - r} ${y + h}`;
+           
+           // Bottom edge
+           if (sector === 'bottom') {
+               d += ` L ${x + w/2 + 10} ${y + h} L ${tx} ${ty} L ${x + w/2 - 10} ${y + h}`;
+           }
+           d += ` L ${x + r} ${y + h} Q ${x} ${y + h} ${x} ${y + h - r}`;
+           
+           // Left edge
+           if (sector === 'left') {
+               d += ` L ${x} ${y + h/2 + 10} L ${tx} ${ty} L ${x} ${y + h/2 - 10}`;
+           }
+           d += ` L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y}`;
+           
+           // Top edge
+           if (sector === 'top') {
+               d += ` L ${x + w/2 - 10} ${y} L ${tx} ${ty} L ${x + w/2 + 10} ${y}`;
+           }
+           d += ` Z`;
+           
+           return d;
         }
-        path.closePath();
-        return path;
       };
 
       const loadPDF = async (file) => {
@@ -287,7 +323,6 @@
             const width = pageData.originalWidth;
             const height = pageData.originalHeight;
             
-            // Create a canvas with the original dimensions (1:1 scale with PDF points)
             const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
@@ -349,33 +384,11 @@
                    ctx.lineWidth = 3;
                    
                    const tail = ann.tailTip || { x: boxW/2, y: boxH + 50 };
-                   const tx = boxX + tail.x;
-                   const ty = boxY + tail.y;
-
-                   ctx.beginPath();
-                   if (ann.type === 'calloutCircle') {
-                       ctx.ellipse(boxX + boxW/2, boxY + boxH/2, boxW/2, boxH/2, 0, 0, 2 * Math.PI);
-                       ctx.moveTo(boxX + boxW/2 + 10, boxY + boxH * 0.85); 
-                       ctx.lineTo(tx, ty);
-                       ctx.lineTo(boxX + boxW/2 - 10, boxY + boxH * 0.85);
-                   } else {
-                       const r = 10;
-                       ctx.moveTo(boxX + r, boxY);
-                       ctx.lineTo(boxX + boxW - r, boxY);
-                       ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + r);
-                       ctx.lineTo(boxX + boxW, boxY + boxH - r);
-                       ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH);
-                       ctx.lineTo(boxX + boxW * 0.6, boxY + boxH);
-                       ctx.lineTo(tx, ty);
-                       ctx.lineTo(boxX + boxW * 0.4, boxY + boxH);
-                       ctx.lineTo(boxX + r, boxY + boxH);
-                       ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - r);
-                       ctx.lineTo(boxX, boxY + r);
-                       ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
-                   }
-                   ctx.closePath();
-                   ctx.fill();
-                   ctx.stroke();
+                   const pathData = getBubblePathStr(boxX, boxY, boxW, boxH, tail, ann.type);
+                   const p = new Path2D(pathData);
+                   
+                   ctx.fill(p);
+                   ctx.stroke(p);
                    
                    ctx.fillStyle = ann.color;
                    const fontWeight = ann.fontWeight === 'bold' ? 'bold' : 'normal';
@@ -464,6 +477,10 @@
 
       const AnnotationEditor = ({ page, imageSrc, textContent, viewportInfo, onClose, onSave }) => {
         const [annotations, setAnnotations] = useState(page.annotations || []);
+        // History for Undo/Redo
+        const [history, setHistory] = useState([]);
+        const [redoStack, setRedoStack] = useState([]);
+
         const [tool, setTool] = useState('select');
         const [showShapeMenu, setShowShapeMenu] = useState(false);
         const [showTextMenu, setShowTextMenu] = useState(false);
@@ -481,20 +498,66 @@
         const [currentAnnotation, setCurrentAnnotation] = useState(null); 
         
         // Selection
-        const [selectedId, setSelectedId] = useState(null);
+        const [selectedIds, setSelectedIds] = useState(new Set()); // Multi-selection
         const [interactionMode, setInteractionMode] = useState('none');
         const [resizeHandle, setResizeHandle] = useState(null);
         const [interactionStartPos, setInteractionStartPos] = useState({ x: 0, y: 0 });
-        const [initialAnnState, setInitialAnnState] = useState(null);
+        const [initialAnnStates, setInitialAnnStates] = useState(new Map());
         
+        // Selection Box
+        const [selectionBox, setSelectionBox] = useState(null);
+
         // Text Selection
         const [textSelection, setTextSelection] = useState(null); 
         
         const imgRef = useRef(null);
         const containerRef = useRef(null);
         const fileInputRef = useRef(null);
+        const textMenuRef = useRef(null);
+        const shapeMenuRef = useRef(null);
         
         const initialAnnotationsStr = useRef(JSON.stringify(page.annotations || []));
+
+        // Close menus on outside click
+        useEffect(() => {
+           const handleClickOutside = (event) => {
+               if (textMenuRef.current && !textMenuRef.current.contains(event.target)) setShowTextMenu(false);
+               if (shapeMenuRef.current && !shapeMenuRef.current.contains(event.target)) setShowShapeMenu(false);
+           };
+           document.addEventListener("mousedown", handleClickOutside);
+           return () => document.removeEventListener("mousedown", handleClickOutside);
+        }, []);
+
+        const saveToHistory = (newAnns) => {
+            setHistory(prev => [...prev, annotations]);
+            setRedoStack([]); // Clear redo on new action
+            setAnnotations(newAnns);
+        };
+
+        const undo = () => {
+            if (history.length === 0) return;
+            const previous = history[history.length - 1];
+            const newHistory = history.slice(0, -1);
+            setRedoStack(prev => [annotations, ...prev]);
+            setAnnotations(previous);
+            setHistory(newHistory);
+        };
+
+        const redo = () => {
+            if (redoStack.length === 0) return;
+            const next = redoStack[0];
+            const newRedo = redoStack.slice(1);
+            setHistory(prev => [...prev, annotations]);
+            setAnnotations(next);
+            setRedoStack(newRedo);
+        };
+
+        const deleteSelected = () => {
+            if (selectedIds.size === 0) return;
+            const remaining = annotations.filter(a => !selectedIds.has(a.id));
+            saveToHistory(remaining);
+            setSelectedIds(new Set());
+        };
 
         const fitWidth = () => {
           if (containerRef.current) {
@@ -530,7 +593,6 @@
                 setTextSelection(null);
                 return;
             }
-            
             const range = selection.getRangeAt(0);
             const rects = range.getClientRects();
             const containerRect = imgRef.current.getBoundingClientRect();
@@ -553,12 +615,9 @@
             if (hasOverlap) {
                 const scaleX = page.originalWidth / containerRect.width;
                 const scaleY = page.originalHeight / containerRect.height;
-                
                 setTextSelection({
-                    x: minX * scaleX,
-                    y: minY * scaleY,
-                    width: (maxX - minX) * scaleX,
-                    height: (maxY - minY) * scaleY
+                    x: minX * scaleX, y: minY * scaleY,
+                    width: (maxX - minX) * scaleX, height: (maxY - minY) * scaleY
                 });
             } else {
                 setTextSelection(null);
@@ -568,15 +627,11 @@
         const applyTextHighlight = () => {
             if (!textSelection) return;
             const newAnn = {
-                 id: generateId(),
-                 type: 'highlight',
-                 x: textSelection.x,
-                 y: textSelection.y,
-                 width: textSelection.width,
-                 height: textSelection.height,
+                 id: generateId(), type: 'highlight',
+                 x: textSelection.x, y: textSelection.y, width: textSelection.width, height: textSelection.height,
                  color: '#ffff00'
             };
-            setAnnotations([...annotations, newAnn]);
+            saveToHistory([...annotations, newAnn]);
             setTextSelection(null);
             window.getSelection().removeAllRanges();
         };
@@ -586,29 +641,49 @@
             return () => document.removeEventListener('selectionchange', handleTextSelection);
         }, []);
 
+        // Toolbar Sync
         useEffect(() => {
-          if (selectedId) {
-              setAnnotations(prev => prev.map(ann => {
-                  if (ann.id === selectedId) {
-                      const updates = {};
-                      if (['text','callout','calloutCircle'].includes(ann.type)) {
-                          updates.fontSize = fontSize;
-                          updates.fontWeight = isBold ? 'bold' : 'normal';
-                          updates.fontFamily = fontFamily;
-                      }
-                      if (ann.type !== 'image') {
-                        updates.color = color;
-                      }
-                      return { ...ann, ...updates };
+          if (selectedIds.size === 1) {
+              const id = Array.from(selectedIds)[0];
+              const ann = annotations.find(a => a.id === id);
+              if (ann) {
+                  if (['text','callout','calloutCircle'].includes(ann.type)) {
+                      setFontSize(ann.fontSize);
+                      setIsBold(ann.fontWeight === 'bold');
+                      setFontFamily(ann.fontFamily);
                   }
-                  return ann;
-              }));
+                  if (ann.type !== 'image') setColor(ann.color);
+              }
           }
-        }, [fontSize, isBold, fontFamily, color, selectedId]);
+        }, [selectedIds]);
+
+        // Apply style changes to selection
+        useEffect(() => {
+          if (selectedIds.size > 0) {
+              // Only update if the user actively changed something? 
+              // This effect runs on state change, we need to be careful not to overwrite on selection.
+              // We'll trust that the user inputs are the source of truth when selected.
+              // BUT: infinite loop risk if we update annotations -> selectedIds dependency.
+              // Let's wrap setters to only update selected items.
+          }
+        }, []);
+        
+        const updateSelectionStyle = (key, value) => {
+            if (selectedIds.size === 0) return;
+            const newAnns = annotations.map(ann => {
+                if (selectedIds.has(ann.id)) {
+                    if (key === 'color' && ann.type === 'image') return ann;
+                    if (['fontSize', 'fontFamily', 'fontWeight'].includes(key) && !['text','callout','calloutCircle'].includes(ann.type)) return ann;
+                    return { ...ann, [key]: value };
+                }
+                return ann;
+            });
+            setAnnotations(newAnns);
+        };
 
         useEffect(() => {
             const handleKeyDown = (e) => {
-                if (!selectedId) return;
+                if (selectedIds.size === 0) return;
                 const step = e.shiftKey ? 50 : 10;
                 let dx = 0; let dy = 0;
                 switch(e.key) {
@@ -618,14 +693,26 @@
                     case 'ArrowRight': dx = step; break;
                     case 'Delete': 
                     case 'Backspace':
-                        deleteAnnotation(selectedId);
+                        deleteSelected();
+                        return;
+                    case 'z':
+                        if (e.ctrlKey || e.metaKey) {
+                            e.preventDefault();
+                            if (e.shiftKey) redo(); else undo();
+                        }
+                        return;
+                    case 'y':
+                        if (e.ctrlKey || e.metaKey) {
+                            e.preventDefault();
+                            redo();
+                        }
                         return;
                     default: return;
                 }
                 if (dx !== 0 || dy !== 0) {
                     e.preventDefault();
                     setAnnotations(prev => prev.map(ann => {
-                        if (ann.id === selectedId) {
+                        if (selectedIds.has(ann.id)) {
                             return { ...ann, x: ann.x + dx, y: ann.y + dy };
                         }
                         return ann;
@@ -634,7 +721,7 @@
             };
             window.addEventListener('keydown', handleKeyDown);
             return () => window.removeEventListener('keydown', handleKeyDown);
-        }, [selectedId]);
+        }, [selectedIds, history, redoStack]);
 
         const getPointerPos = (e) => {
           if (!imgRef.current) return { x: 0, y: 0 };
@@ -647,31 +734,69 @@
         };
         
         const selectTool = (t) => {
-           setSelectedId(null);
+           setSelectedIds(new Set());
            setTool(t);
            const defaults = {
-             rect: '#ef4444',
-             filledRect: '#000000',
-             circle: '#ef4444',
-             cross: '#ef4444',
-             arrow: '#ef4444',
-             text: '#000000',
-             callout: '#000000',
-             calloutCircle: '#000000',
-             highlight: '#ffff00'
+             rect: '#ef4444', filledRect: '#000000', circle: '#ef4444', cross: '#ef4444', arrow: '#ef4444',
+             text: '#000000', callout: '#000000', calloutCircle: '#000000', highlight: '#ffff00'
            };
            if (defaults[t]) setColor(defaults[t]);
         };
 
         const handleMouseDown = (e) => {
-          if (e.target.closest('button') || e.target.closest('.cursor-nw-resize')) return;
-          
-          if (interactionMode !== 'none') return;
-          if (tool === 'select') { setSelectedId(null); return; }
+          if (e.target.closest('button') || e.target.closest('.cursor-nw-resize') || e.target.closest('.cursor-crosshair')) return; // Handles
           
           e.preventDefault();
           const { x, y } = getPointerPos(e);
           setDragStartPos({ x, y });
+
+          if (tool === 'select') {
+             // Check if clicking on an annotation
+             // We need to check in reverse order (topmost first)
+             const clickedId = [...annotations].reverse().find(ann => {
+                 let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
+                 if (ann.type === 'arrow') {
+                     const minX = Math.min(ann.x, ann.x + ann.width); const minY = Math.min(ann.y, ann.y + ann.height);
+                     const maxX = Math.max(ann.x, ann.x + ann.width); const maxY = Math.max(ann.y, ann.y + ann.height);
+                     boxX = minX; boxY = minY; boxW = maxX - minX; boxH = maxY - minY;
+                     // Add buffer
+                     boxX -= 5; boxY -= 5; boxW += 10; boxH += 10;
+                 } else {
+                    if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); }
+                    if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
+                 }
+                 if (ann.type === 'text') {
+                    // approximate text hit box
+                    const approxW = (ann.text.length * ann.fontSize) || 100;
+                    const approxH = ann.fontSize || 32;
+                    return x >= boxX && x <= boxX + approxW && y >= boxY && y <= boxY + approxH;
+                 }
+                 return x >= boxX && x <= boxX + boxW && y >= boxY && y <= boxY + boxH;
+             })?.id;
+
+             if (clickedId) {
+                 if (e.shiftKey) {
+                     const newSet = new Set(selectedIds);
+                     if (newSet.has(clickedId)) newSet.delete(clickedId); else newSet.add(clickedId);
+                     setSelectedIds(newSet);
+                 } else {
+                     if (!selectedIds.has(clickedId)) setSelectedIds(new Set([clickedId]));
+                     // Start moving
+                     setInteractionMode('moving');
+                     setInteractionStartPos({ x, y });
+                     const stateMap = new Map();
+                     annotations.forEach(a => stateMap.set(a.id, {...a}));
+                     setInitialAnnStates(stateMap);
+                 }
+             } else {
+                 // Start selection box
+                 setSelectedIds(new Set());
+                 setSelectionBox({ x, y, w: 0, h: 0 });
+                 setInteractionMode('selecting');
+             }
+             return;
+          }
+
           setIsDrawing(true);
 
           if (['text','callout','calloutCircle'].includes(tool)) {
@@ -688,8 +813,8 @@
                  fontFamily: fontFamily,
                  tailTip: tool !== 'text' ? { x: 100, y: 150 } : undefined 
                };
-               setAnnotations([...annotations, newAnn]);
-               setSelectedId(newAnn.id); 
+               saveToHistory([...annotations, newAnn]);
+               setSelectedIds(new Set([newAnn.id]));
              }
              setIsDrawing(false);
           } else if (tool === 'image') {
@@ -703,37 +828,42 @@
         const handleMouseMove = (e) => {
           const { x, y } = getPointerPos(e);
 
-          if (interactionMode === 'moving' && selectedId && initialAnnState) {
+          if (interactionMode === 'moving' && selectedIds.size > 0) {
               const dx = x - interactionStartPos.x;
               const dy = y - interactionStartPos.y;
               setAnnotations(prev => prev.map(ann => {
-                  if (ann.id === selectedId) {
-                      return { ...ann, x: initialAnnState.x + dx, y: initialAnnState.y + dy };
+                  if (selectedIds.has(ann.id)) {
+                      const initial = initialAnnStates.get(ann.id);
+                      if (initial) {
+                          return { ...ann, x: initial.x + dx, y: initial.y + dy };
+                      }
                   }
                   return ann;
               }));
               return;
           }
 
-          if (interactionMode === 'resizing' && selectedId && initialAnnState && resizeHandle) {
+          if (interactionMode === 'resizing' && selectedIds.size === 1) {
+              const id = Array.from(selectedIds)[0];
+              const initial = initialAnnStates.get(id);
+              if (!initial) return;
+
               const dx = x - interactionStartPos.x;
               const dy = y - interactionStartPos.y;
 
               setAnnotations(prev => prev.map(ann => {
-                  if (ann.id !== selectedId) return ann;
+                  if (ann.id !== id) return ann;
                   
                   if (['text','callout','calloutCircle'].includes(ann.type)) {
-                       // Scale font size based on resize factor (using height difference as proxy)
-                       const scaleFactor = 1 + (dy / (initialAnnState.height || 100)); 
-                       const newSize = Math.max(10, initialAnnState.fontSize * scaleFactor);
+                       const scaleFactor = 1 + (dy / (initial.height || 100)); 
+                       const newSize = Math.max(10, Math.floor(initial.fontSize * scaleFactor));
                        
-                       let newW = initialAnnState.width || 0;
-                       let newH = initialAnnState.height || 0;
+                       let newW = initial.width || 0;
+                       let newH = initial.height || 0;
                        
-                       // For callouts, also scale the box
                        if (ann.type !== 'text') {
                           if (resizeHandle.includes('e')) newW += dx;
-                          if (resizeHandle.includes('w')) { /* ... */ newW -= dx; } // Simplify horizontal scaling for now
+                          if (resizeHandle.includes('w')) { /* ... */ newW -= dx; }
                           if (resizeHandle.includes('s')) newH += dy;
                           if (resizeHandle.includes('n')) { /* ... */ newH -= dy; }
                        }
@@ -741,10 +871,10 @@
                        return { ...ann, fontSize: newSize, width: newW, height: newH };
                   }
 
-                  let newX = initialAnnState.x;
-                  let newY = initialAnnState.y;
-                  let newW = initialAnnState.width || 0;
-                  let newH = initialAnnState.height || 0;
+                  let newX = initial.x;
+                  let newY = initial.y;
+                  let newW = initial.width || 0;
+                  let newH = initial.height || 0;
                   
                   if (resizeHandle.includes('e')) newW += dx;
                   if (resizeHandle.includes('w')) { newX += dx; newW -= dx; }
@@ -756,17 +886,27 @@
               return;
           }
           
-          if (interactionMode === 'tail' && selectedId && initialAnnState) {
+          if (interactionMode === 'tail' && selectedIds.size === 1) {
+             const id = Array.from(selectedIds)[0];
+             const initial = initialAnnStates.get(id);
+             if (!initial) return;
              const dx = x - interactionStartPos.x;
              const dy = y - interactionStartPos.y;
              setAnnotations(prev => prev.map(ann => {
-                 if (ann.id !== selectedId) return ann;
-                 const baseTail = initialAnnState.tailTip || {x: initialAnnState.width/2, y: initialAnnState.height + 50};
-                 return {
-                     ...ann,
-                     tailTip: { x: baseTail.x + dx, y: baseTail.y + dy }
-                 };
+                 if (ann.id !== id) return ann;
+                 const baseTail = initial.tailTip || {x: initial.width/2, y: initial.height + 50};
+                 return { ...ann, tailTip: { x: baseTail.x + dx, y: baseTail.y + dy } };
              }));
+             return;
+          }
+
+          if (interactionMode === 'selecting') {
+             setSelectionBox({
+                 x: Math.min(dragStartPos.x, x),
+                 y: Math.min(dragStartPos.y, y),
+                 w: Math.abs(x - dragStartPos.x),
+                 h: Math.abs(y - dragStartPos.y)
+             });
              return;
           }
 
@@ -777,9 +917,33 @@
         };
 
         const handleMouseUp = () => {
+          if (interactionMode === 'moving' || interactionMode === 'resizing' || interactionMode === 'tail') {
+              // Save history after interaction
+              saveToHistory(annotations);
+          }
+          
+          if (interactionMode === 'selecting' && selectionBox) {
+              const { x, y, w, h } = selectionBox;
+              const newSelection = new Set();
+              annotations.forEach(ann => {
+                 // Check intersection
+                 let boxX = ann.x; let boxY = ann.y; let boxW = ann.width || 0; let boxH = ann.height || 0;
+                 if (ann.type === 'text') { boxW = 100; boxH = 32; } // Approx
+                 if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); }
+                 if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
+                 
+                 // Simple rect overlap
+                 if (x < boxX + boxW && x + w > boxX && y < boxY + boxH && y + h > boxY) {
+                     newSelection.add(ann.id);
+                 }
+              });
+              setSelectedIds(newSelection);
+              setSelectionBox(null);
+          }
+
           setInteractionMode('none');
           setResizeHandle(null);
-          setInitialAnnState(null);
+          setInitialAnnStates(new Map());
 
           if (!isDrawing) return;
           setIsDrawing(false);
@@ -794,104 +958,32 @@
                height: currentAnnotation.height,
                color: currentAnnotation.color,
              };
-             setAnnotations([...annotations, newAnn]);
-             setSelectedId(newAnn.id); // Immediate select to allow moving
+             saveToHistory([...annotations, newAnn]);
+             setSelectedIds(new Set([newAnn.id])); 
           }
           setCurrentAnnotation(null);
-        };
-
-        const handleClipboardCopy = async () => {
-             const canvas = document.createElement('canvas');
-             const img = new Image();
-             img.onload = async () => {
-                 canvas.width = page.originalWidth;
-                 canvas.height = page.originalHeight;
-                 const ctx = canvas.getContext('2d');
-                 ctx.drawImage(img, 0, 0, page.originalWidth, page.originalHeight);
-                 
-                 for (const ann of annotations) {
-                     let x = ann.x || 0; let y = ann.y || 0; let w = ann.width || 0; let h = ann.height || 0;
-                     if (ann.type !== 'arrow') {
-                         if (w < 0) { x += w; w = Math.abs(w); }
-                         if (h < 0) { y += h; h = Math.abs(h); }
-                     }
-                     
-                     ctx.save();
-                     // Render Logic duplicated from generateFinalPDF for consistency
-                     if (ann.type === 'highlight') {
-                         ctx.fillStyle = ann.color; ctx.globalAlpha = 0.4; ctx.fillRect(x,y,w,h);
-                     } else if (ann.type === 'rect') {
-                         ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.strokeRect(x,y,w,h);
-                     } else if (ann.type === 'filledRect') {
-                         ctx.fillStyle = ann.color; ctx.fillRect(x,y,w,h);
-                     } else if (ann.type === 'text' && ann.text) {
-                         ctx.fillStyle = ann.color; ctx.font = `${ann.fontWeight||'normal'} ${ann.fontSize||32}px ${ann.fontFamily||'sans-serif'}`; ctx.textBaseline='top'; ctx.fillText(ann.text, x, y);
-                     } else if ((ann.type === 'callout' || ann.type === 'calloutCircle') && ann.text) {
-                         ctx.fillStyle = 'white'; ctx.strokeStyle = ann.color; ctx.lineWidth = 3;
-                         const tail = ann.tailTip || { x: w/2, y: h + 50 };
-                         const tx = x + tail.x; const ty = y + tail.y;
-                         ctx.beginPath();
-                         if (ann.type === 'calloutCircle') {
-                            ctx.ellipse(x+w/2, y+h/2, w/2, h/2, 0, 0, 2 * Math.PI);
-                            ctx.moveTo(x + w/2 + 10, y + h * 0.85); ctx.lineTo(tx, ty); ctx.lineTo(x + w/2 - 10, y + h * 0.85);
-                         } else {
-                            const r = 10;
-                            ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-                            ctx.lineTo(x + w * 0.6, y + h); ctx.lineTo(tx, ty); ctx.lineTo(x + w * 0.4, y + h);
-                            ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
-                         }
-                         ctx.closePath(); ctx.fill(); ctx.stroke();
-                         ctx.fillStyle = ann.color;
-                         ctx.font = `${ann.fontWeight||'normal'} ${ann.fontSize||24}px ${ann.fontFamily||'sans-serif'}`;
-                         const metrics = ctx.measureText(ann.text);
-                         ctx.fillText(ann.text, x + (w-metrics.width)/2, y + (h-(ann.fontSize||24))/2);
-                     } else if (ann.type === 'arrow') {
-                          const startX = ann.x; const startY = ann.y; const endX = ann.x + ann.width; const endY = ann.y + ann.height;
-                          const headLen = 20; const angle = Math.atan2(endY - startY, endX - startX);
-                          ctx.strokeStyle = ann.color; ctx.fillStyle = ann.color; ctx.lineWidth = 5;
-                          ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY); ctx.stroke();
-                          ctx.beginPath(); ctx.moveTo(endX, endY);
-                          ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
-                          ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6), endY - headLen * Math.sin(angle + Math.PI / 6));
-                          ctx.closePath(); ctx.fill();
-                     } else if (ann.type === 'circle') {
-                         ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(x+w/2, y+h/2, w/2, h/2, 0, 0, 2*Math.PI); ctx.stroke();
-                     } else if (ann.type === 'cross') {
-                         ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y+h); ctx.moveTo(x+w,y); ctx.lineTo(x,y+h); ctx.stroke();
-                     }
-                     ctx.restore();
-                 }
-
-                 canvas.toBlob(blob => {
-                     navigator.clipboard.write([new ClipboardItem({[blob.type]: blob})])
-                       .then(() => alert("画像をコピーしました"))
-                       .catch(e => alert("コピーに失敗しました"));
-                 });
-             };
-             img.src = imageSrc;
         };
 
         const handleResizeStart = (e, handle, id) => {
             e.stopPropagation(); e.preventDefault();
             const ann = annotations.find(a => a.id === id);
             if (!ann) return;
-            setSelectedId(id); setInteractionMode('resizing'); setResizeHandle(handle); setInteractionStartPos(getPointerPos(e)); setInitialAnnState({ ...ann });
+            setSelectedIds(new Set([id])); 
+            setInteractionMode('resizing'); setResizeHandle(handle); setInteractionStartPos(getPointerPos(e));
+            const stateMap = new Map(); stateMap.set(id, {...ann}); setInitialAnnStates(stateMap);
         };
         
         const handleTailDragStart = (e, id) => {
             e.stopPropagation(); e.preventDefault();
             const ann = annotations.find(a => a.id === id);
             if (!ann) return;
-            setSelectedId(id); setInteractionMode('tail'); setInteractionStartPos(getPointerPos(e)); setInitialAnnState({ ...ann });
-        };
-
-        const deleteAnnotation = (id) => {
-          setAnnotations(annotations.filter(a => a.id !== id));
-          if (selectedId === id) setSelectedId(null);
+            setSelectedIds(new Set([id]));
+            setInteractionMode('tail'); setInteractionStartPos(getPointerPos(e));
+            const stateMap = new Map(); stateMap.set(id, {...ann}); setInitialAnnStates(stateMap);
         };
 
         const renderAnnotation = (ann, isPreview = false) => {
-           const isSelected = !isPreview && ann.id === selectedId;
+           const isSelected = !isPreview && selectedIds.has(ann.id);
 
            let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
            if (ann.type !== 'arrow') {
@@ -919,6 +1011,9 @@
 
            const renderHandles = () => {
                if (!isSelected || !ann.id) return null;
+               // Only show resize handles if strictly one item selected
+               if (selectedIds.size > 1) return null;
+               
                const hStyle = "absolute w-3 h-3 bg-white border border-brand-500 rounded-full z-50 pointer-events-auto";
                return (
                    <>
@@ -969,22 +1064,7 @@
                        <div style={{ width: '100%', height: '100%', overflow: 'visible' }}>
                            <svg width="1" height="1" style={{ overflow: 'visible', width: '100%', height: '100%' }}>
                                <path 
-                                  d={(() => {
-                                      const w = boxW; const h = boxH;
-                                      const tx = tail.x; const ty = tail.y;
-                                      if (ann.type === 'calloutCircle') {
-                                          const rx = w/2; const ry = h/2;
-                                          let d = `M ${w} ${h/2} A ${rx} ${ry} 0 1 0 0 ${h/2} A ${rx} ${ry} 0 1 0 ${w} ${h/2} `;
-                                          d += `M ${w/2 + 10} ${h*0.85} L ${tx} ${ty} L ${w/2 - 10} ${h*0.85}`;
-                                          return d;
-                                      } else {
-                                          const r = 10;
-                                          let d = `M ${r} 0 L ${w-r} 0 Q ${w} 0 ${w} ${r} L ${w} ${h-r} Q ${w} ${h} ${w-r} ${h}`;
-                                          d += ` L ${w*0.6} ${h} L ${tx} ${ty} L ${w*0.4} ${h}`;
-                                          d += ` L ${r} ${h} Q 0 ${h} 0 ${h-r} L 0 ${r} Q 0 0 ${r} 0`;
-                                          return d;
-                                      }
-                                  })()}
+                                  d={getBubblePathStr(0, 0, boxW, boxH, tail, ann.type)}
                                   fill="white" stroke={ann.color} strokeWidth="2" vectorEffect="non-scaling-stroke" 
                                />
                            </svg>
@@ -1008,26 +1088,7 @@
 
            return (
               <div key={ann.id || 'preview'} style={style} onMouseDown={(e) => ann.id && !isPreview && handleMouseDown(e)}>
-                  <div style={{width:'100%', height:'100%'}} onMouseDown={(e) => {
-                      if(!isPreview) {
-                          e.stopPropagation();
-                          setTool('select');
-                          setSelectedId(ann.id);
-                          setInteractionMode('moving');
-                          setInteractionStartPos(getPointerPos(e));
-                          setInitialAnnState({...ann});
-                          
-                          // SYNC TOOLBAR ON SELECT
-                          if (['text','callout','calloutCircle'].includes(ann.type)) {
-                              setFontSize(ann.fontSize || 32);
-                              setIsBold(ann.fontWeight === 'bold');
-                              setFontFamily(ann.fontFamily || 'Meiryo UI');
-                          }
-                          if (ann.type !== 'image') setColor(ann.color);
-                      }
-                  }}>
-                    {renderContent()}
-                  </div>
+                  {renderContent()}
                   {renderHandles()}
               </div>
            );
@@ -1049,21 +1110,29 @@
 
         return (
           <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
-            <div className="bg-white p-3 flex justify-between items-center shadow-md z-20">
+            <div className="bg-white p-3 flex justify-between items-center shadow-md z-[60]">
               <h2 className="text-lg font-bold flex items-center gap-2 text-slate-700">
                   <Move className="text-brand-600" size={20}/> ページ編集
               </h2>
               
               <div className="flex items-center gap-4">
-                   <div className={`flex items-center gap-2 border-r border-slate-300 pr-4 transition-opacity ${['text','callout','calloutCircle'].includes(tool) || (selectedId && ['text','callout','calloutCircle'].includes(annotations.find(a=>a.id===selectedId)?.type)) ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                   <div className="flex items-center gap-1 border-r border-slate-300 pr-4">
+                       <button onClick={undo} disabled={history.length===0} className="p-1.5 hover:bg-slate-100 rounded disabled:opacity-30" title="元に戻す"><Undo size={18} /></button>
+                       <button onClick={redo} disabled={redoStack.length===0} className="p-1.5 hover:bg-slate-100 rounded disabled:opacity-30" title="やり直す"><Redo size={18} /></button>
+                       {selectedIds.size > 0 && (
+                           <button onClick={deleteSelected} className="ml-2 p-1.5 hover:bg-red-50 text-red-600 rounded" title="削除"><Trash2 size={18}/></button>
+                       )}
+                   </div>
+
+                   <div className={`flex items-center gap-2 border-r border-slate-300 pr-4 transition-opacity ${['text','callout','calloutCircle'].includes(tool) || (selectedIds.size > 0) ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
                        <Type size={16} className="text-slate-500" />
-                       <select value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} className="border border-slate-300 rounded px-1 py-0.5 text-sm w-32">
+                       <select value={fontFamily} onChange={(e) => { setFontFamily(e.target.value); updateSelectionStyle('fontFamily', e.target.value); }} className="border border-slate-300 rounded px-1 py-0.5 text-sm w-32">
                            <option value="Meiryo UI">メイリオUI</option>
                            <option value="sans-serif">ゴシック体</option>
                            <option value="serif">明朝体</option>
                        </select>
-                       <input type="number" step="4" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} className="w-16 border border-slate-300 rounded px-1 py-0.5 text-sm" />
-                       <button onClick={() => setIsBold(!isBold)} className={`p-1 rounded ${isBold ? 'bg-brand-100 text-brand-600 border border-brand-200' : 'text-slate-500 hover:bg-slate-100'}`}><Bold size={16} /></button>
+                       <input type="number" step="1" value={Math.floor(fontSize)} onChange={(e) => { const v = parseInt(e.target.value); setFontSize(v); updateSelectionStyle('fontSize', v); }} className="w-14 border border-slate-300 rounded px-1 py-0.5 text-sm" />
+                       <button onClick={() => { setIsBold(!isBold); updateSelectionStyle('fontWeight', !isBold ? 'bold' : 'normal'); }} className={`p-1 rounded ${isBold ? 'bg-brand-100 text-brand-600 border border-brand-200' : 'text-slate-500 hover:bg-slate-100'}`}><Bold size={16} /></button>
                    </div>
                    
                    <button onClick={handleClipboardCopy} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="画像をコピー"><Copy size={20} /></button>
@@ -1082,7 +1151,7 @@
                           const reader = new FileReader();
                           reader.onload = (ev) => {
                              const newAnn = { id: generateId(), type: 'image', x: 50, y: 50, width: 300, height: 300, imageData: ev.target.result };
-                             setAnnotations([...annotations, newAnn]);
+                             saveToHistory([...annotations, newAnn]);
                              setTool('select');
                           };
                           reader.readAsDataURL(e.target.files[0]);
@@ -1093,7 +1162,7 @@
                   <div className="w-10 h-px bg-slate-600 my-1"></div>
                   
                   {/* Text Menu */}
-                  <div className="relative group w-full px-2 flex justify-center">
+                  <div className="relative group w-full px-2 flex justify-center" ref={textMenuRef}>
                        <button onClick={() => setShowTextMenu(!showTextMenu)} className={`p-3 rounded-lg flex flex-col items-center gap-1 w-full ${['text','callout','calloutCircle'].includes(tool) ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
                            <Type size={20} /> <span className="text-[10px]">テキスト</span>
                        </button>
@@ -1109,7 +1178,7 @@
                   <ToolButton active={tool === 'highlight'} onClick={() => selectTool('highlight')} icon={<Highlighter size={20} />} label="蛍光ペン" />
                   
                   {/* Shapes Menu */}
-                  <div className="relative group w-full px-2 flex justify-center">
+                  <div className="relative group w-full px-2 flex justify-center" ref={shapeMenuRef}>
                        <button onClick={() => setShowShapeMenu(!showShapeMenu)} className={`p-3 rounded-lg flex flex-col items-center gap-1 w-full ${['rect','filledRect','circle','cross','arrow'].includes(tool) ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
                            <Shapes size={20} /> <span className="text-[10px]">図形</span>
                        </button>
@@ -1127,12 +1196,12 @@
                   <div className="w-10 h-px bg-slate-600 my-1"></div>
                   <div className="flex flex-col gap-2 mt-2">
                       {['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#000000', '#ffffff'].map(c => (
-                          <button key={c} onClick={() => { setColor(c); if(selectedId) { setAnnotations(prev=>prev.map(a=>a.id===selectedId && a.type!=='image'?{...a,color:c}:a)) } }} className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-transparent'}`} style={{ backgroundColor: c }} />
+                          <button key={c} onClick={() => { setColor(c); updateSelectionStyle('color', c); }} className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-transparent'}`} style={{ backgroundColor: c }} />
                       ))}
                   </div>
               </div>
 
-              <div className="flex-1 bg-slate-500 overflow-auto relative flex items-center justify-center p-8" ref={containerRef}>
+              <div className="flex-1 bg-slate-500 overflow-auto relative flex items-center justify-center p-8 z-0" ref={containerRef}>
                    <div className="relative bg-white shadow-2xl origin-center" style={{ width: page.originalWidth * zoom, height: page.originalHeight * zoom }}>
                         <img ref={imgRef} src={imageSrc} className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" draggable={false} />
                         
@@ -1171,6 +1240,20 @@
                              >
                                  <Highlighter size={14} /> マーカーを引く
                              </button>
+                        )}
+                        
+                        {selectionBox && (
+                            <div style={{
+                                position: 'absolute',
+                                left: `${(selectionBox.x / page.originalWidth) * 100}%`,
+                                top: `${(selectionBox.y / page.originalHeight) * 100}%`,
+                                width: `${(selectionBox.w / page.originalWidth) * 100}%`,
+                                height: `${(selectionBox.h / page.originalHeight) * 100}%`,
+                                backgroundColor: 'rgba(14, 165, 233, 0.2)',
+                                border: '1px solid #0ea5e9',
+                                zIndex: 50,
+                                pointerEvents: 'none'
+                            }} />
                         )}
 
                         <div className="absolute inset-0 z-10" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}>
@@ -1499,10 +1582,13 @@
             {/* Main Content */}
             <div className="flex-1 p-8 overflow-y-auto bg-slate-50/50">
                {pages.length === 0 ? (
-                 <div className="h-full flex flex-col items-center justify-center text-slate-400 border-4 border-dashed border-slate-200 rounded-2xl p-12 bg-white">
+                 <div 
+                   className="h-full flex flex-col items-center justify-center text-slate-400 border-4 border-dashed border-slate-200 rounded-2xl p-12 bg-white cursor-pointer hover:bg-slate-50 transition-colors"
+                   onClick={() => fileInputRef.current?.click()}
+                 >
                     <Upload size={64} className="mb-6 text-brand-200" />
                     <p className="text-xl font-medium text-slate-600">PDFまたは画像をここにドラッグ＆ドロップ</p>
-                    <p className="mt-2 text-slate-400">または「ファイル追加」ボタンから選択</p>
+                    <p className="mt-2 text-slate-400">または、ここをクリックしてファイルを選択</p>
                  </div>
                ) : (
                  <>
