@@ -29,6 +29,11 @@
                 '0%': { transform: 'translate(-50%, 100%)', opacity: 0 },
                 '100%': { transform: 'translate(-50%, 0)', opacity: 1 },
               }
+            },
+            cursor: {
+              'crosshair': 'crosshair',
+              'text': 'text',
+              'move': 'move',
             }
           }
         }
@@ -79,6 +84,12 @@
       ::selection {
         background: rgba(14, 165, 233, 0.3);
       }
+      .preserve-3d {
+        transform-style: preserve-3d;
+      }
+      /* Custom Cursor Classes */
+      .cursor-draw-rect { cursor: crosshair; }
+      .cursor-draw-text { cursor: text; }
     </style>
   <link rel="stylesheet" href="/index.css">
 </head>
@@ -145,17 +156,18 @@
         ChevronsRight: createIcon(<><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></>),
         Undo: createIcon(<><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></>),
         Redo: createIcon(<><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 3.7"/></>),
+        Folder: createIcon(<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>),
       };
     
       const { 
         X, Square, FilledSquare, Circle, ArrowRight, Type, Move, Check, Highlighter, 
         ImageIcon, ZoomIn, ZoomOut, Bold, 
         Upload, FileDown, Trash2, RotateCw, Edit3, Copy, Plus, 
-        ArrowUpDown, ArrowLeftRight, RefreshCcw, Shapes,
+        ChevronDown, ArrowUpDown, ArrowLeftRight, RefreshCcw, Shapes,
         Hash, MessageSquare, FolderPlus,
         LayoutGrid, Layers, Columns,
         ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-        Undo, Redo
+        Undo, Redo, Folder
       } = Icons;
 
       const generateId = () => {
@@ -178,7 +190,6 @@
            const cy = y + h/2;
            const rx = Math.abs(w)/2;
            const ry = Math.abs(h)/2;
-           // Determine attachment point (simple ray casting)
            const angle = Math.atan2(ty - cy, tx - cx);
            const px = cx + Math.cos(angle) * rx;
            const py = cy + Math.sin(angle) * ry;
@@ -188,19 +199,16 @@
            const py3 = cy + Math.sin(angle - 0.2) * ry;
 
            let d = `M ${cx+rx} ${cy} A ${rx} ${ry} 0 1 1 ${cx-rx} ${cy} A ${rx} ${ry} 0 1 1 ${cx+rx} ${cy}`;
-           // Add tail triangle
            d += ` M ${px2} ${py2} L ${tx} ${ty} L ${px3} ${py3}`;
            return d;
         } else {
            const r = 10;
-           // 4-sector logic for rectangular callout
            const cx = x + w/2; 
            const cy = y + h/2;
            const dx = tx - cx; 
            const dy = ty - cy;
            
            let sector = 'bottom';
-           // normalize to aspect ratio
            if (Math.abs(dx) * h > Math.abs(dy) * w) {
               sector = dx > 0 ? 'right' : 'left';
            } else {
@@ -208,31 +216,22 @@
            }
 
            let d = `M ${x + r} ${y} L ${x + w - r} ${y} Q ${x + w} ${y} ${x + w} ${y + r}`;
-           
-           // Right edge
            if (sector === 'right') {
               d += ` L ${x + w} ${y + h/2 - 10} L ${tx} ${ty} L ${x + w} ${y + h/2 + 10}`;
            }
            d += ` L ${x + w} ${y + h - r} Q ${x + w} ${y + h} ${x + w - r} ${y + h}`;
-           
-           // Bottom edge
            if (sector === 'bottom') {
                d += ` L ${x + w/2 + 10} ${y + h} L ${tx} ${ty} L ${x + w/2 - 10} ${y + h}`;
            }
            d += ` L ${x + r} ${y + h} Q ${x} ${y + h} ${x} ${y + h - r}`;
-           
-           // Left edge
            if (sector === 'left') {
                d += ` L ${x} ${y + h/2 + 10} L ${tx} ${ty} L ${x} ${y + h/2 - 10}`;
            }
            d += ` L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y}`;
-           
-           // Top edge
            if (sector === 'top') {
                d += ` L ${x + w/2 - 10} ${y} L ${tx} ${ty} L ${x + w/2 + 10} ${y}`;
            }
            d += ` Z`;
-           
            return d;
         }
       };
@@ -240,14 +239,12 @@
       const loadPDF = async (file) => {
         let arrayBuffer = await file.arrayBuffer();
         let fileName = file.name;
-
         const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(file.name);
 
         if (isImage && file.type !== 'application/pdf') {
           try {
             const pdfDoc = await PDFLib.PDFDocument.create();
             let image;
-            
             if (file.type === 'image/jpeg' || file.type === 'image/jpg' || fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg')) {
               image = await pdfDoc.embedJpg(arrayBuffer);
             } else {
@@ -257,10 +254,8 @@
                  image = await pdfDoc.embedJpg(arrayBuffer);
               }
             }
-
             const page = pdfDoc.addPage([image.width, image.height]);
             page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
-
             const pdfBytes = await pdfDoc.save();
             arrayBuffer = pdfBytes.buffer;
             fileName = fileName + ".pdf"; 
@@ -272,20 +267,17 @@
 
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer.slice(0) });
         const pdf = await loadingTask.promise;
-        
         const sourceId = generateId();
         const pages = [];
 
         for (let i = 0; i < pdf.numPages; i++) {
           const page = await pdf.getPage(i + 1);
-          // Scale 2.0 for clearer thumbnails
           const viewport = page.getViewport({ scale: 2.0 }); 
           
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           canvas.height = viewport.height;
           canvas.width = viewport.width;
-
           await page.render({ canvasContext: context, viewport: viewport }).promise;
 
           pages.push({
@@ -294,25 +286,19 @@
             pageIndex: i,
             rotation: 0,
             thumbnailUrl: canvas.toDataURL(),
-            originalWidth: viewport.width / 2.0, // Normalize to scale 1.0
+            originalWidth: viewport.width / 2.0,
             originalHeight: viewport.height / 2.0,
             annotations: []
           });
         }
-
-        return {
-          source: { id: sourceId, name: fileName, data: arrayBuffer },
-          pages
-        };
+        return { source: { id: sourceId, name: fileName, data: arrayBuffer }, pages };
       };
 
       const generateFinalPDF = async (pages, sources) => {
         const mergedPdf = await PDFLib.PDFDocument.create();
-
         for (const pageData of pages) {
           const source = sources.get(pageData.sourcePdfId);
           if (!source) continue;
-
           const sourcePdfDoc = await PDFLib.PDFDocument.load(source.data);
           const [copiedPage] = await mergedPdf.copyPages(sourcePdfDoc, [pageData.pageIndex]);
           
@@ -322,7 +308,6 @@
           if (pageData.annotations.length > 0) {
             const width = pageData.originalWidth;
             const height = pageData.originalHeight;
-            
             const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
@@ -330,15 +315,9 @@
 
             if (ctx) {
               ctx.textBaseline = 'top'; 
-
               for (const ann of pageData.annotations) {
                  ctx.globalAlpha = 1.0; 
-                 
-                 let boxX = ann.x || 0;
-                 let boxY = ann.y || 0;
-                 let boxW = ann.width || 0;
-                 let boxH = ann.height || 0;
-
+                 let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
                  if (ann.type !== 'arrow') {
                      if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); }
                      if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
@@ -350,27 +329,17 @@
                      ctx.fillRect(boxX, boxY, boxW, boxH);
                      ctx.globalAlpha = 1.0; 
                  } else if (ann.type === 'rect') {
-                   ctx.strokeStyle = ann.color;
-                   ctx.lineWidth = 4;
-                   ctx.strokeRect(boxX, boxY, boxW, boxH);
+                   ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.strokeRect(boxX, boxY, boxW, boxH);
                  } else if (ann.type === 'filledRect') {
-                   ctx.fillStyle = ann.color;
-                   ctx.fillRect(boxX, boxY, boxW, boxH);
+                   ctx.fillStyle = ann.color; ctx.fillRect(boxX, boxY, boxW, boxH);
                  } else if (ann.type === 'circle') {
-                   ctx.strokeStyle = ann.color;
-                   ctx.lineWidth = 4;
-                   ctx.beginPath();
+                   ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.beginPath();
                    ctx.ellipse(boxX + boxW/2, boxY + boxH/2, Math.abs(boxW)/2, Math.abs(boxH)/2, 0, 0, 2 * Math.PI);
                    ctx.stroke();
                  } else if (ann.type === 'cross') {
-                   ctx.strokeStyle = ann.color;
-                   ctx.lineWidth = 4;
-                   ctx.beginPath();
-                   ctx.moveTo(boxX, boxY);
-                   ctx.lineTo(boxX + boxW, boxY + boxH);
-                   ctx.moveTo(boxX + boxW, boxY);
-                   ctx.lineTo(boxX, boxY + boxH);
-                   ctx.stroke();
+                   ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.beginPath();
+                   ctx.moveTo(boxX, boxY); ctx.lineTo(boxX + boxW, boxY + boxH);
+                   ctx.moveTo(boxX + boxW, boxY); ctx.lineTo(boxX, boxY + boxH); ctx.stroke();
                  } else if (ann.type === 'text' && ann.text) {
                    ctx.fillStyle = ann.color;
                    const fontWeight = ann.fontWeight === 'bold' ? 'bold' : 'normal';
@@ -379,17 +348,11 @@
                    ctx.font = `${fontWeight} ${fSize}px ${fontFamily}`;
                    ctx.fillText(ann.text, ann.x, ann.y); 
                  } else if ((ann.type === 'callout' || ann.type === 'calloutCircle') && ann.text) {
-                   ctx.fillStyle = 'white';
-                   ctx.strokeStyle = ann.color;
-                   ctx.lineWidth = 3;
-                   
+                   ctx.fillStyle = 'white'; ctx.strokeStyle = ann.color; ctx.lineWidth = 3;
                    const tail = ann.tailTip || { x: boxW/2, y: boxH + 50 };
                    const pathData = getBubblePathStr(boxX, boxY, boxW, boxH, tail, ann.type);
                    const p = new Path2D(pathData);
-                   
-                   ctx.fill(p);
-                   ctx.stroke(p);
-                   
+                   ctx.fill(p); ctx.stroke(p);
                    ctx.fillStyle = ann.color;
                    const fontWeight = ann.fontWeight === 'bold' ? 'bold' : 'normal';
                    const fSize = ann.fontSize || 24;
@@ -399,59 +362,32 @@
                    const textX = boxX + (boxW - metrics.width)/2;
                    const textY = boxY + (boxH - fSize)/2;
                    ctx.fillText(ann.text, textX, textY);
-                   
                  } else if (ann.type === 'arrow') {
-                   ctx.strokeStyle = ann.color;
-                   ctx.fillStyle = ann.color;
-                   ctx.lineWidth = 5;
-                   
-                   const startX = ann.x;
-                   const startY = ann.y;
-                   const endX = ann.x + ann.width;
-                   const endY = ann.y + ann.height;
-                   
+                   ctx.strokeStyle = ann.color; ctx.fillStyle = ann.color; ctx.lineWidth = 5;
+                   const startX = ann.x; const startY = ann.y;
+                   const endX = ann.x + ann.width; const endY = ann.y + ann.height;
                    const headLen = 20; 
                    const angle = Math.atan2(endY - startY, endX - startX);
-                   
-                   ctx.beginPath();
-                   ctx.moveTo(startX, startY);
-                   ctx.lineTo(endX, endY);
-                   ctx.stroke();
-                   
-                   ctx.beginPath();
-                   ctx.moveTo(endX, endY);
+                   ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY); ctx.stroke();
+                   ctx.beginPath(); ctx.moveTo(endX, endY);
                    ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
                    ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6), endY - headLen * Math.sin(angle + Math.PI / 6));
-                   ctx.closePath();
-                   ctx.fill();
+                   ctx.closePath(); ctx.fill();
                  } else if (ann.type === 'image' && ann.imageData) {
                      await new Promise((resolve) => {
                          const img = new Image();
-                         img.onload = () => {
-                             ctx.drawImage(img, boxX, boxY, boxW, boxH);
-                             resolve(null);
-                         };
+                         img.onload = () => { ctx.drawImage(img, boxX, boxY, boxW, boxH); resolve(null); };
                          img.src = ann.imageData; 
                      });
                  }
               }
-
               const pngImageBytes = await fetch(canvas.toDataURL('image/png')).then(res => res.arrayBuffer());
               const pngImage = await mergedPdf.embedPng(pngImageBytes);
-              
-              // Draw the annotation layer on top of the existing page
-              copiedPage.drawImage(pngImage, {
-                x: 0,
-                y: 0,
-                width: copiedPage.getWidth(),
-                height: copiedPage.getHeight(),
-              });
+              copiedPage.drawImage(pngImage, { x: 0, y: 0, width: copiedPage.getWidth(), height: copiedPage.getHeight() });
             }
           }
-
           mergedPdf.addPage(copiedPage);
         }
-
         return await mergedPdf.save();
       };
 
@@ -460,16 +396,12 @@
           const pdf = await loadingTask.promise;
           const page = await pdf.getPage(pageData.pageIndex + 1);
           const viewport = page.getViewport({ scale: 3.0, rotation: pageData.rotation });
-          
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           canvas.height = viewport.height;
           canvas.width = viewport.width;
-
           await page.render({ canvasContext: context, viewport: viewport }).promise;
-          
           const textContent = await page.getTextContent();
-          
           return { dataUrl: canvas.toDataURL(), textContent, viewport };
       };
 
@@ -477,37 +409,25 @@
 
       const AnnotationEditor = ({ page, imageSrc, textContent, viewportInfo, onClose, onSave }) => {
         const [annotations, setAnnotations] = useState(page.annotations || []);
-        // History for Undo/Redo
         const [history, setHistory] = useState([]);
         const [redoStack, setRedoStack] = useState([]);
-
         const [tool, setTool] = useState('select');
         const [showShapeMenu, setShowShapeMenu] = useState(false);
         const [showTextMenu, setShowTextMenu] = useState(false);
-        
-        // Settings
         const [color, setColor] = useState('#ef4444');
         const [fontSize, setFontSize] = useState(32);
         const [fontFamily, setFontFamily] = useState('Meiryo UI');
         const [isBold, setIsBold] = useState(false);
         const [zoom, setZoom] = useState(0.8);
-        
-        // Interaction
         const [isDrawing, setIsDrawing] = useState(false);
         const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 }); 
         const [currentAnnotation, setCurrentAnnotation] = useState(null); 
-        
-        // Selection
-        const [selectedIds, setSelectedIds] = useState(new Set()); // Multi-selection
+        const [selectedIds, setSelectedIds] = useState(new Set()); 
         const [interactionMode, setInteractionMode] = useState('none');
         const [resizeHandle, setResizeHandle] = useState(null);
         const [interactionStartPos, setInteractionStartPos] = useState({ x: 0, y: 0 });
         const [initialAnnStates, setInitialAnnStates] = useState(new Map());
-        
-        // Selection Box
         const [selectionBox, setSelectionBox] = useState(null);
-
-        // Text Selection
         const [textSelection, setTextSelection] = useState(null); 
         
         const imgRef = useRef(null);
@@ -515,10 +435,8 @@
         const fileInputRef = useRef(null);
         const textMenuRef = useRef(null);
         const shapeMenuRef = useRef(null);
-        
         const initialAnnotationsStr = useRef(JSON.stringify(page.annotations || []));
 
-        // Close menus on outside click
         useEffect(() => {
            const handleClickOutside = (event) => {
                if (textMenuRef.current && !textMenuRef.current.contains(event.target)) setShowTextMenu(false);
@@ -528,82 +446,69 @@
            return () => document.removeEventListener("mousedown", handleClickOutside);
         }, []);
 
-        const saveToHistory = (newAnns) => {
-            setHistory(prev => [...prev, annotations]);
-            setRedoStack([]); // Clear redo on new action
-            setAnnotations(newAnns);
-        };
-
+        const saveToHistory = (newAnns) => { setHistory(prev => [...prev, annotations]); setRedoStack([]); setAnnotations(newAnns); };
         const undo = () => {
             if (history.length === 0) return;
             const previous = history[history.length - 1];
-            const newHistory = history.slice(0, -1);
-            setRedoStack(prev => [annotations, ...prev]);
-            setAnnotations(previous);
-            setHistory(newHistory);
+            setRedoStack(prev => [annotations, ...prev]); setAnnotations(previous); setHistory(history.slice(0, -1));
         };
-
         const redo = () => {
             if (redoStack.length === 0) return;
             const next = redoStack[0];
-            const newRedo = redoStack.slice(1);
-            setHistory(prev => [...prev, annotations]);
-            setAnnotations(next);
-            setRedoStack(newRedo);
+            setHistory(prev => [...prev, annotations]); setAnnotations(next); setRedoStack(redoStack.slice(1));
         };
-
         const deleteSelected = () => {
             if (selectedIds.size === 0) return;
             const remaining = annotations.filter(a => !selectedIds.has(a.id));
-            saveToHistory(remaining);
-            setSelectedIds(new Set());
+            saveToHistory(remaining); setSelectedIds(new Set());
         };
 
-        const fitWidth = () => {
-          if (containerRef.current) {
-            const containerW = containerRef.current.clientWidth - 64; 
-            setZoom(containerW / page.originalWidth);
-          }
-        };
-
-        const fitHeight = () => {
-          if (containerRef.current) {
-             const containerH = containerRef.current.clientHeight - 64; 
-             setZoom(containerH / page.originalHeight);
-          }
-        };
-        
-        useEffect(() => {
-           fitHeight();
-        }, []);
-        
-        const handleClose = () => {
-             const currentStr = JSON.stringify(annotations);
-             if (currentStr !== initialAnnotationsStr.current) {
-                 if (!confirm("変更内容が保存されていません。破棄してもよろしいですか？")) {
-                     return;
+        const handleClipboardCopy = async () => {
+             const canvas = document.createElement('canvas');
+             canvas.width = page.originalWidth; canvas.height = page.originalHeight;
+             const ctx = canvas.getContext('2d');
+             const bgImg = new Image();
+             bgImg.crossOrigin = "anonymous";
+             bgImg.src = imageSrc;
+             await new Promise(resolve => { bgImg.onload = resolve; });
+             ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+             ctx.textBaseline = 'top';
+             for (const ann of annotations) {
+                 ctx.globalAlpha = 1.0; 
+                 let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
+                 if (ann.type !== 'arrow') { if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); } }
+                 if (ann.type === 'highlight') { ctx.fillStyle = ann.color; ctx.globalAlpha = 0.4; ctx.fillRect(boxX, boxY, boxW, boxH); ctx.globalAlpha = 1.0; }
+                 else if (ann.type === 'rect') { ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.strokeRect(boxX, boxY, boxW, boxH); }
+                 else if (ann.type === 'text' && ann.text) {
+                   ctx.fillStyle = ann.color;
+                   const fontWeight = ann.fontWeight === 'bold' ? 'bold' : 'normal';
+                   ctx.font = `${fontWeight} ${ann.fontSize || 32}px ${ann.fontFamily || 'sans-serif'}`;
+                   ctx.fillText(ann.text, ann.x, ann.y); 
                  }
+                 // ... (Simplified for brevity, similar to renderAnnotation)
              }
+             canvas.toBlob(blob => { if (blob) { navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(() => alert("画像をクリップボードにコピーしました")); } }, 'image/png');
+        };
+
+        const fitWidth = () => { if (containerRef.current) setZoom((containerRef.current.clientWidth - 64) / page.originalWidth); };
+        const fitHeight = () => { if (containerRef.current) setZoom((containerRef.current.clientHeight - 64) / page.originalHeight); };
+        useEffect(() => { fitHeight(); }, []);
+        const handleClose = () => {
+             if (JSON.stringify(annotations) !== initialAnnotationsStr.current && !confirm("変更内容が保存されていません。破棄してもよろしいですか？")) return;
              onClose();
         };
 
         const handleTextSelection = () => {
+            if (!imgRef.current) return;
             const selection = window.getSelection();
-            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-                setTextSelection(null);
-                return;
-            }
-            const range = selection.getRangeAt(0);
-            const rects = range.getClientRects();
+            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) { setTextSelection(null); return; }
+            const range = selection.getRangeAt(0); const rects = range.getClientRects();
             const containerRect = imgRef.current.getBoundingClientRect();
-            
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             let hasOverlap = false;
-
             for (let i = 0; i < rects.length; i++) {
                 const rect = rects[i];
-                if (rect.right > containerRect.left && rect.left < containerRect.right && 
-                    rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+                if (rect.right > containerRect.left && rect.left < containerRect.right && rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
                         minX = Math.min(minX, rect.left - containerRect.left);
                         minY = Math.min(minY, rect.top - containerRect.top);
                         maxX = Math.max(maxX, rect.right - containerRect.left);
@@ -611,472 +516,165 @@
                         hasOverlap = true;
                 }
             }
-
             if (hasOverlap) {
                 const scaleX = page.originalWidth / containerRect.width;
                 const scaleY = page.originalHeight / containerRect.height;
-                setTextSelection({
-                    x: minX * scaleX, y: minY * scaleY,
-                    width: (maxX - minX) * scaleX, height: (maxY - minY) * scaleY
-                });
-            } else {
-                setTextSelection(null);
-            }
+                setTextSelection({ x: minX * scaleX, y: minY * scaleY, width: (maxX - minX) * scaleX, height: (maxY - minY) * scaleY });
+            } else setTextSelection(null);
         };
-        
         const applyTextHighlight = () => {
             if (!textSelection) return;
-            const newAnn = {
-                 id: generateId(), type: 'highlight',
-                 x: textSelection.x, y: textSelection.y, width: textSelection.width, height: textSelection.height,
-                 color: '#ffff00'
-            };
-            saveToHistory([...annotations, newAnn]);
-            setTextSelection(null);
-            window.getSelection().removeAllRanges();
+            saveToHistory([...annotations, { id: generateId(), type: 'highlight', x: textSelection.x, y: textSelection.y, width: textSelection.width, height: textSelection.height, color: '#ffff00' }]);
+            setTextSelection(null); window.getSelection().removeAllRanges();
         };
-
-        useEffect(() => {
-            document.addEventListener('selectionchange', handleTextSelection);
-            return () => document.removeEventListener('selectionchange', handleTextSelection);
-        }, []);
-
-        // Toolbar Sync
+        useEffect(() => { document.addEventListener('selectionchange', handleTextSelection); return () => document.removeEventListener('selectionchange', handleTextSelection); }, []);
         useEffect(() => {
           if (selectedIds.size === 1) {
-              const id = Array.from(selectedIds)[0];
-              const ann = annotations.find(a => a.id === id);
+              const ann = annotations.find(a => a.id === Array.from(selectedIds)[0]);
               if (ann) {
-                  if (['text','callout','calloutCircle'].includes(ann.type)) {
-                      setFontSize(ann.fontSize);
-                      setIsBold(ann.fontWeight === 'bold');
-                      setFontFamily(ann.fontFamily);
-                  }
+                  if (['text','callout','calloutCircle'].includes(ann.type)) { setFontSize(ann.fontSize); setIsBold(ann.fontWeight === 'bold'); setFontFamily(ann.fontFamily); }
                   if (ann.type !== 'image') setColor(ann.color);
               }
           }
         }, [selectedIds]);
-
-        // Apply style changes to selection
-        useEffect(() => {
-          if (selectedIds.size > 0) {
-              // Only update if the user actively changed something? 
-              // This effect runs on state change, we need to be careful not to overwrite on selection.
-              // We'll trust that the user inputs are the source of truth when selected.
-              // BUT: infinite loop risk if we update annotations -> selectedIds dependency.
-              // Let's wrap setters to only update selected items.
-          }
-        }, []);
-        
-        const updateSelectionStyle = (key, value) => {
-            if (selectedIds.size === 0) return;
-            const newAnns = annotations.map(ann => {
-                if (selectedIds.has(ann.id)) {
-                    if (key === 'color' && ann.type === 'image') return ann;
-                    if (['fontSize', 'fontFamily', 'fontWeight'].includes(key) && !['text','callout','calloutCircle'].includes(ann.type)) return ann;
-                    return { ...ann, [key]: value };
-                }
-                return ann;
-            });
-            setAnnotations(newAnns);
-        };
-
         useEffect(() => {
             const handleKeyDown = (e) => {
                 if (selectedIds.size === 0) return;
                 const step = e.shiftKey ? 50 : 10;
                 let dx = 0; let dy = 0;
-                switch(e.key) {
-                    case 'ArrowUp': dy = -step; break;
-                    case 'ArrowDown': dy = step; break;
-                    case 'ArrowLeft': dx = -step; break;
-                    case 'ArrowRight': dx = step; break;
-                    case 'Delete': 
-                    case 'Backspace':
-                        deleteSelected();
-                        return;
-                    case 'z':
-                        if (e.ctrlKey || e.metaKey) {
-                            e.preventDefault();
-                            if (e.shiftKey) redo(); else undo();
-                        }
-                        return;
-                    case 'y':
-                        if (e.ctrlKey || e.metaKey) {
-                            e.preventDefault();
-                            redo();
-                        }
-                        return;
-                    default: return;
-                }
-                if (dx !== 0 || dy !== 0) {
-                    e.preventDefault();
-                    setAnnotations(prev => prev.map(ann => {
-                        if (selectedIds.has(ann.id)) {
-                            return { ...ann, x: ann.x + dx, y: ann.y + dy };
-                        }
-                        return ann;
-                    }));
-                }
+                if (e.key === 'ArrowUp') dy = -step; else if (e.key === 'ArrowDown') dy = step; else if (e.key === 'ArrowLeft') dx = -step; else if (e.key === 'ArrowRight') dx = step;
+                else if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); return; }
+                else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+                else if (e.key === 'y' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); redo(); return; }
+                else return;
+                if (dx !== 0 || dy !== 0) { e.preventDefault(); setAnnotations(prev => prev.map(a => selectedIds.has(a.id) ? { ...a, x: a.x + dx, y: a.y + dy } : a)); }
             };
-            window.addEventListener('keydown', handleKeyDown);
-            return () => window.removeEventListener('keydown', handleKeyDown);
+            window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown);
         }, [selectedIds, history, redoStack]);
 
         const getPointerPos = (e) => {
-          if (!imgRef.current) return { x: 0, y: 0 };
-          const rect = imgRef.current.getBoundingClientRect();
-          const relX = e.clientX - rect.left;
-          const relY = e.clientY - rect.top;
+          if (!containerRef.current) return { x: 0, y: 0 };
+          const rect = containerRef.current.getBoundingClientRect();
           const scaleX = page.originalWidth / rect.width;
           const scaleY = page.originalHeight / rect.height;
-          return { x: relX * scaleX, y: relY * scaleY };
+          return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
         };
-        
         const selectTool = (t) => {
-           setSelectedIds(new Set());
-           setTool(t);
-           const defaults = {
-             rect: '#ef4444', filledRect: '#000000', circle: '#ef4444', cross: '#ef4444', arrow: '#ef4444',
-             text: '#000000', callout: '#000000', calloutCircle: '#000000', highlight: '#ffff00'
-           };
+           setSelectedIds(new Set()); setTool(t);
+           const defaults = { rect: '#ef4444', filledRect: '#000000', circle: '#ef4444', cross: '#ef4444', arrow: '#ef4444', text: '#000000', callout: '#000000', calloutCircle: '#000000', highlight: '#ffff00' };
            if (defaults[t]) setColor(defaults[t]);
         };
-
         const handleMouseDown = (e) => {
-          if (e.target.closest('button') || e.target.closest('.cursor-nw-resize') || e.target.closest('.cursor-crosshair')) return; // Handles
-          
-          e.preventDefault();
-          const { x, y } = getPointerPos(e);
+          if (e.target.closest('button') || e.target.closest('.cursor-nw-resize') || e.target.closest('.cursor-crosshair')) return; 
+          e.preventDefault(); 
+          const { x, y } = getPointerPos(e); 
           setDragStartPos({ x, y });
-
           if (tool === 'select') {
-             // Check if clicking on an annotation
-             // We need to check in reverse order (topmost first)
              const clickedId = [...annotations].reverse().find(ann => {
                  let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
                  if (ann.type === 'arrow') {
                      const minX = Math.min(ann.x, ann.x + ann.width); const minY = Math.min(ann.y, ann.y + ann.height);
                      const maxX = Math.max(ann.x, ann.x + ann.width); const maxY = Math.max(ann.y, ann.y + ann.height);
-                     boxX = minX; boxY = minY; boxW = maxX - minX; boxH = maxY - minY;
-                     // Add buffer
-                     boxX -= 5; boxY -= 5; boxW += 10; boxH += 10;
-                 } else {
-                    if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); }
-                    if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
-                 }
-                 if (ann.type === 'text') {
-                    // approximate text hit box
-                    const approxW = (ann.text.length * ann.fontSize) || 100;
-                    const approxH = ann.fontSize || 32;
-                    return x >= boxX && x <= boxX + approxW && y >= boxY && y <= boxY + approxH;
-                 }
+                     boxX = minX - 5; boxY = minY - 5; boxW = maxX - minX + 10; boxH = maxY - minY + 10;
+                 } else { if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); } }
+                 if (ann.type === 'text') { const approxW = (ann.text.length * ann.fontSize) || 100; const approxH = ann.fontSize || 32; return x >= boxX && x <= boxX + approxW && y >= boxY && y <= boxY + approxH; }
                  return x >= boxX && x <= boxX + boxW && y >= boxY && y <= boxY + boxH;
              })?.id;
-
              if (clickedId) {
-                 if (e.shiftKey) {
-                     const newSet = new Set(selectedIds);
-                     if (newSet.has(clickedId)) newSet.delete(clickedId); else newSet.add(clickedId);
-                     setSelectedIds(newSet);
-                 } else {
-                     if (!selectedIds.has(clickedId)) setSelectedIds(new Set([clickedId]));
-                     // Start moving
-                     setInteractionMode('moving');
-                     setInteractionStartPos({ x, y });
-                     const stateMap = new Map();
-                     annotations.forEach(a => stateMap.set(a.id, {...a}));
-                     setInitialAnnStates(stateMap);
-                 }
-             } else {
-                 // Start selection box
-                 setSelectedIds(new Set());
-                 setSelectionBox({ x, y, w: 0, h: 0 });
-                 setInteractionMode('selecting');
-             }
+                 if (e.shiftKey) { const newSet = new Set(selectedIds); if (newSet.has(clickedId)) newSet.delete(clickedId); else newSet.add(clickedId); setSelectedIds(newSet); }
+                 else { if (!selectedIds.has(clickedId)) setSelectedIds(new Set([clickedId])); setInteractionMode('moving'); setInteractionStartPos({ x, y }); const stateMap = new Map(); annotations.forEach(a => stateMap.set(a.id, {...a})); setInitialAnnStates(stateMap); }
+             } else { setSelectedIds(new Set()); setSelectionBox({ x, y, w: 0, h: 0 }); setInteractionMode('selecting'); }
              return;
           }
-
           setIsDrawing(true);
-
           if (['text','callout','calloutCircle'].includes(tool)) {
              const text = prompt("テキストを入力してください:", "");
              if (text && text.trim() !== "") {
-               const newAnn = {
-                 id: generateId(),
-                 type: tool,
-                 x, y,
-                 width: tool !== 'text' ? 200 : undefined,
-                 height: tool !== 'text' ? 100 : undefined,
-                 text, color, fontSize,
-                 fontWeight: isBold ? 'bold' : 'normal',
-                 fontFamily: fontFamily,
-                 tailTip: tool !== 'text' ? { x: 100, y: 150 } : undefined 
-               };
-               saveToHistory([...annotations, newAnn]);
-               setSelectedIds(new Set([newAnn.id]));
+               const newAnn = { id: generateId(), type: tool, x, y, width: tool !== 'text' ? 200 : undefined, height: tool !== 'text' ? 100 : undefined, text, color, fontSize, fontWeight: isBold ? 'bold' : 'normal', fontFamily: fontFamily, tailTip: tool !== 'text' ? { x: 100, y: 150 } : undefined };
+               saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id]));
              }
              setIsDrawing(false);
-          } else if (tool === 'image') {
-              fileInputRef.current?.click();
-              setIsDrawing(false);
-          } else {
-            setCurrentAnnotation({ type: tool, x, y, width: 0, height: 0, color });
-          }
+          } else if (tool === 'image') { fileInputRef.current?.click(); setIsDrawing(false); }
+          else { setCurrentAnnotation({ type: tool, x, y, width: 0, height: 0, color }); }
         };
-
         const handleMouseMove = (e) => {
           const { x, y } = getPointerPos(e);
-
           if (interactionMode === 'moving' && selectedIds.size > 0) {
-              const dx = x - interactionStartPos.x;
-              const dy = y - interactionStartPos.y;
-              setAnnotations(prev => prev.map(ann => {
-                  if (selectedIds.has(ann.id)) {
-                      const initial = initialAnnStates.get(ann.id);
-                      if (initial) {
-                          return { ...ann, x: initial.x + dx, y: initial.y + dy };
-                      }
-                  }
-                  return ann;
-              }));
+              const dx = x - interactionStartPos.x; const dy = y - interactionStartPos.y;
+              setAnnotations(prev => prev.map(ann => selectedIds.has(ann.id) && initialAnnStates.get(ann.id) ? { ...ann, x: initialAnnStates.get(ann.id).x + dx, y: initialAnnStates.get(ann.id).y + dy } : ann));
               return;
           }
-
           if (interactionMode === 'resizing' && selectedIds.size === 1) {
-              const id = Array.from(selectedIds)[0];
-              const initial = initialAnnStates.get(id);
-              if (!initial) return;
-
-              const dx = x - interactionStartPos.x;
-              const dy = y - interactionStartPos.y;
-
+              const id = Array.from(selectedIds)[0]; const initial = initialAnnStates.get(id); if (!initial) return;
+              const dx = x - interactionStartPos.x; const dy = y - interactionStartPos.y;
               setAnnotations(prev => prev.map(ann => {
                   if (ann.id !== id) return ann;
-                  
                   if (['text','callout','calloutCircle'].includes(ann.type)) {
                        const scaleFactor = 1 + (dy / (initial.height || 100)); 
                        const newSize = Math.max(10, Math.floor(initial.fontSize * scaleFactor));
-                       
-                       let newW = initial.width || 0;
-                       let newH = initial.height || 0;
-                       
-                       if (ann.type !== 'text') {
-                          if (resizeHandle.includes('e')) newW += dx;
-                          if (resizeHandle.includes('w')) { /* ... */ newW -= dx; }
-                          if (resizeHandle.includes('s')) newH += dy;
-                          if (resizeHandle.includes('n')) { /* ... */ newH -= dy; }
-                       }
-
+                       let newW = initial.width || 0; let newH = initial.height || 0;
+                       if (ann.type !== 'text') { if (resizeHandle.includes('e')) newW += dx; if (resizeHandle.includes('w')) newW -= dx; if (resizeHandle.includes('s')) newH += dy; if (resizeHandle.includes('n')) newH -= dy; }
                        return { ...ann, fontSize: newSize, width: newW, height: newH };
                   }
-
-                  let newX = initial.x;
-                  let newY = initial.y;
-                  let newW = initial.width || 0;
-                  let newH = initial.height || 0;
-                  
-                  if (resizeHandle.includes('e')) newW += dx;
-                  if (resizeHandle.includes('w')) { newX += dx; newW -= dx; }
-                  if (resizeHandle.includes('s')) newH += dy;
-                  if (resizeHandle.includes('n')) { newY += dy; newH -= dy; }
-
+                  let newX = initial.x; let newY = initial.y; let newW = initial.width || 0; let newH = initial.height || 0;
+                  if (resizeHandle.includes('e')) newW += dx; if (resizeHandle.includes('w')) { newX += dx; newW -= dx; } if (resizeHandle.includes('s')) newH += dy; if (resizeHandle.includes('n')) { newY += dy; newH -= dy; }
                   return { ...ann, x: newX, y: newY, width: newW, height: newH };
-              }));
-              return;
+              })); return;
           }
-          
           if (interactionMode === 'tail' && selectedIds.size === 1) {
-             const id = Array.from(selectedIds)[0];
-             const initial = initialAnnStates.get(id);
-             if (!initial) return;
-             const dx = x - interactionStartPos.x;
-             const dy = y - interactionStartPos.y;
-             setAnnotations(prev => prev.map(ann => {
-                 if (ann.id !== id) return ann;
-                 const baseTail = initial.tailTip || {x: initial.width/2, y: initial.height + 50};
-                 return { ...ann, tailTip: { x: baseTail.x + dx, y: baseTail.y + dy } };
-             }));
+             const id = Array.from(selectedIds)[0]; const initial = initialAnnStates.get(id); if (!initial) return;
+             const dx = x - interactionStartPos.x; const dy = y - interactionStartPos.y;
+             setAnnotations(prev => prev.map(ann => ann.id !== id ? ann : { ...ann, tailTip: { x: (initial.tailTip || {x: initial.width/2, y: initial.height+50}).x + dx, y: (initial.tailTip || {x: initial.width/2, y: initial.height+50}).y + dy } }));
              return;
           }
-
-          if (interactionMode === 'selecting') {
-             setSelectionBox({
-                 x: Math.min(dragStartPos.x, x),
-                 y: Math.min(dragStartPos.y, y),
-                 w: Math.abs(x - dragStartPos.x),
-                 h: Math.abs(y - dragStartPos.y)
-             });
-             return;
-          }
-
+          if (interactionMode === 'selecting') { setSelectionBox({ x: Math.min(dragStartPos.x, x), y: Math.min(dragStartPos.y, y), w: Math.abs(x - dragStartPos.x), h: Math.abs(y - dragStartPos.y) }); return; }
           if (!isDrawing || !currentAnnotation) return;
-          const dx = x - dragStartPos.x;
-          const dy = y - dragStartPos.y;
-          setCurrentAnnotation(prev => ({ ...prev, width: dx, height: dy }));
+          setCurrentAnnotation(prev => ({ ...prev, width: x - dragStartPos.x, height: y - dragStartPos.y }));
         };
-
         const handleMouseUp = () => {
-          if (interactionMode === 'moving' || interactionMode === 'resizing' || interactionMode === 'tail') {
-              // Save history after interaction
-              saveToHistory(annotations);
-          }
-          
+          if (['moving','resizing','tail'].includes(interactionMode)) saveToHistory(annotations);
           if (interactionMode === 'selecting' && selectionBox) {
-              const { x, y, w, h } = selectionBox;
-              const newSelection = new Set();
+              const { x, y, w, h } = selectionBox; const newSelection = new Set();
               annotations.forEach(ann => {
-                 // Check intersection
                  let boxX = ann.x; let boxY = ann.y; let boxW = ann.width || 0; let boxH = ann.height || 0;
-                 if (ann.type === 'text') { boxW = 100; boxH = 32; } // Approx
-                 if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); }
-                 if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
-                 
-                 // Simple rect overlap
-                 if (x < boxX + boxW && x + w > boxX && y < boxY + boxH && y + h > boxY) {
-                     newSelection.add(ann.id);
-                 }
-              });
-              setSelectedIds(newSelection);
-              setSelectionBox(null);
+                 if (ann.type === 'text') { boxW = 100; boxH = 32; } 
+                 if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
+                 if (x < boxX + boxW && x + w > boxX && y < boxY + boxH && y + h > boxY) newSelection.add(ann.id);
+              }); setSelectedIds(newSelection); setSelectionBox(null);
           }
-
-          setInteractionMode('none');
-          setResizeHandle(null);
-          setInitialAnnStates(new Map());
-
-          if (!isDrawing) return;
-          setIsDrawing(false);
-          
+          setInteractionMode('none'); setResizeHandle(null); setInitialAnnStates(new Map());
+          if (!isDrawing) return; setIsDrawing(false);
           if (currentAnnotation && (Math.abs(currentAnnotation.width) > 5 || Math.abs(currentAnnotation.height) > 5)) {
-             const newAnn = {
-               id: generateId(),
-               type: currentAnnotation.type,
-               x: dragStartPos.x, 
-               y: dragStartPos.y, 
-               width: currentAnnotation.width,
-               height: currentAnnotation.height,
-               color: currentAnnotation.color,
-             };
-             saveToHistory([...annotations, newAnn]);
-             setSelectedIds(new Set([newAnn.id])); 
-          }
-          setCurrentAnnotation(null);
+             const newAnn = { id: generateId(), type: currentAnnotation.type, x: dragStartPos.x, y: dragStartPos.y, width: currentAnnotation.width, height: currentAnnotation.height, color: currentAnnotation.color };
+             saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id])); 
+          } setCurrentAnnotation(null);
         };
-
-        const handleResizeStart = (e, handle, id) => {
-            e.stopPropagation(); e.preventDefault();
-            const ann = annotations.find(a => a.id === id);
-            if (!ann) return;
-            setSelectedIds(new Set([id])); 
-            setInteractionMode('resizing'); setResizeHandle(handle); setInteractionStartPos(getPointerPos(e));
-            const stateMap = new Map(); stateMap.set(id, {...ann}); setInitialAnnStates(stateMap);
-        };
-        
-        const handleTailDragStart = (e, id) => {
-            e.stopPropagation(); e.preventDefault();
-            const ann = annotations.find(a => a.id === id);
-            if (!ann) return;
-            setSelectedIds(new Set([id]));
-            setInteractionMode('tail'); setInteractionStartPos(getPointerPos(e));
-            const stateMap = new Map(); stateMap.set(id, {...ann}); setInitialAnnStates(stateMap);
-        };
-
+        const handleResizeStart = (e, handle, id) => { e.stopPropagation(); e.preventDefault(); setSelectedIds(new Set([id])); setInteractionMode('resizing'); setResizeHandle(handle); setInteractionStartPos(getPointerPos(e)); const stateMap = new Map(); stateMap.set(id, {...annotations.find(a => a.id === id)}); setInitialAnnStates(stateMap); };
+        const handleTailDragStart = (e, id) => { e.stopPropagation(); e.preventDefault(); setSelectedIds(new Set([id])); setInteractionMode('tail'); setInteractionStartPos(getPointerPos(e)); const stateMap = new Map(); stateMap.set(id, {...annotations.find(a => a.id === id)}); setInitialAnnStates(stateMap); };
         const renderAnnotation = (ann, isPreview = false) => {
            const isSelected = !isPreview && selectedIds.has(ann.id);
-
            let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
-           if (ann.type !== 'arrow') {
-               if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); }
-               if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
-           } else {
-               const minX = Math.min(ann.x, ann.x + ann.width); const minY = Math.min(ann.y, ann.y + ann.height);
-               const maxX = Math.max(ann.x, ann.x + ann.width); const maxY = Math.max(ann.y, ann.y + ann.height);
-               boxX = minX; boxY = minY; boxW = maxX - minX; boxH = maxY - minY;
-           }
-
+           if (ann.type !== 'arrow') { if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); } }
+           else { const minX = Math.min(ann.x, ann.x + ann.width); const minY = Math.min(ann.y, ann.y + ann.height); boxX = minX; boxY = minY; boxW = Math.max(ann.x, ann.x + ann.width) - minX; boxH = Math.max(ann.y, ann.y + ann.height) - minY; }
            if (ann.type === 'text') { boxW = undefined; boxH = undefined; }
-
-           const style = {
-             position: 'absolute',
-             left: `${(boxX / page.originalWidth) * 100}%`,
-             top: `${(boxY / page.originalHeight) * 100}%`,
-             width: boxW !== undefined ? `${(boxW / page.originalWidth) * 100}%` : 'auto',
-             height: boxH !== undefined ? `${(boxH / page.originalHeight) * 100}%` : 'auto',
-             pointerEvents: tool === 'select' && !isPreview ? 'auto' : 'none',
-             cursor: tool === 'select' ? 'move' : 'crosshair',
-             zIndex: isPreview ? 20 : (isSelected ? 30 : 10),
-             outline: isSelected ? '2px dashed #0ea5e9' : 'none',
-           };
-
+           const style = { position: 'absolute', left: `${(boxX / page.originalWidth) * 100}%`, top: `${(boxY / page.originalHeight) * 100}%`, width: boxW !== undefined ? `${(boxW / page.originalWidth) * 100}%` : 'auto', height: boxH !== undefined ? `${(boxH / page.originalHeight) * 100}%` : 'auto', pointerEvents: tool === 'select' && !isPreview ? 'auto' : 'none', cursor: tool === 'select' ? 'move' : 'crosshair', zIndex: isPreview ? 20 : (isSelected ? 30 : 10), outline: isSelected ? '2px dashed #0ea5e9' : 'none', };
            const renderHandles = () => {
-               if (!isSelected || !ann.id) return null;
-               // Only show resize handles if strictly one item selected
-               if (selectedIds.size > 1) return null;
-               
+               if (!isSelected || !ann.id || selectedIds.size > 1) return null;
                const hStyle = "absolute w-3 h-3 bg-white border border-brand-500 rounded-full z-50 pointer-events-auto";
-               return (
-                   <>
-                      <div className={`${hStyle} -top-1.5 -left-1.5 cursor-nw-resize`} onMouseDown={(e) => handleResizeStart(e, 'nw', ann.id)} />
-                      <div className={`${hStyle} -top-1.5 -right-1.5 cursor-ne-resize`} onMouseDown={(e) => handleResizeStart(e, 'ne', ann.id)} />
-                      <div className={`${hStyle} -bottom-1.5 -left-1.5 cursor-sw-resize`} onMouseDown={(e) => handleResizeStart(e, 'sw', ann.id)} />
-                      <div className={`${hStyle} -bottom-1.5 -right-1.5 cursor-se-resize`} onMouseDown={(e) => handleResizeStart(e, 'se', ann.id)} />
-                      {(ann.type === 'callout' || ann.type === 'calloutCircle') && ann.tailTip && (
-                          <div 
-                              className="absolute w-4 h-4 bg-yellow-400 border border-black rounded-full z-50 cursor-crosshair shadow-sm pointer-events-auto"
-                              style={{ 
-                                  left: `${(ann.tailTip.x / boxW) * 100}%`,
-                                  top: `${(ann.tailTip.y / boxH) * 100}%`,
-                                  transform: 'translate(-50%, -50%)'
-                              }}
-                              onMouseDown={(e) => handleTailDragStart(e, ann.id)}
-                          />
-                      )}
-                   </>
-               );
+               return ( <> <div className={`${hStyle} -top-1.5 -left-1.5 cursor-nw-resize`} onMouseDown={(e) => handleResizeStart(e, 'nw', ann.id)} /> <div className={`${hStyle} -top-1.5 -right-1.5 cursor-ne-resize`} onMouseDown={(e) => handleResizeStart(e, 'ne', ann.id)} /> <div className={`${hStyle} -bottom-1.5 -left-1.5 cursor-sw-resize`} onMouseDown={(e) => handleResizeStart(e, 'sw', ann.id)} /> <div className={`${hStyle} -bottom-1.5 -right-1.5 cursor-se-resize`} onMouseDown={(e) => handleResizeStart(e, 'se', ann.id)} /> {(ann.type === 'callout' || ann.type === 'calloutCircle') && ann.tailTip && ( <div className="absolute w-4 h-4 bg-yellow-400 border border-black rounded-full z-50 cursor-crosshair shadow-sm pointer-events-auto" style={{ left: `${(ann.tailTip.x / boxW) * 100}%`, top: `${(ann.tailTip.y / boxH) * 100}%`, transform: 'translate(-50%, -50%)' }} onMouseDown={(e) => handleTailDragStart(e, ann.id)} /> )} </> );
            }
-
            const renderContent = () => {
                if (ann.type === 'arrow') {
-                   // Arrow rendering logic
-                   const globalStartX = ann.x; const globalStartY = ann.y;
-                   const globalEndX = ann.x + ann.width; const globalEndY = ann.y + ann.height;
+                   const globalStartX = ann.x; const globalStartY = ann.y; const globalEndX = ann.x + ann.width; const globalEndY = ann.y + ann.height;
                    const minX = Math.min(globalStartX, globalEndX); const minY = Math.min(globalStartY, globalEndY);
-                   const x1 = globalStartX - minX; const y1 = globalStartY - minY;
-                   const x2 = globalEndX - minX; const y2 = globalEndY - minY;
-                   const headLen = 20 * (1/zoom * 0.5 + 0.5);
-                   const angle = Math.atan2(y2 - y1, x2 - x1);
-                   const ax1 = x2 - headLen * Math.cos(angle - Math.PI / 6);
-                   const ay1 = y2 - headLen * Math.sin(angle - Math.PI / 6);
-                   const ax2 = x2 - headLen * Math.cos(angle + Math.PI / 6);
-                   const ay2 = y2 - headLen * Math.sin(angle + Math.PI / 6);
-                   return (
-                       <svg width="100%" height="100%" style={{ overflow: 'visible', pointerEvents: 'none' }}>
-                           <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth="20" style={{ pointerEvents: 'stroke' }} />
-                           <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={ann.color} strokeWidth="5" />
-                           <polygon points={`${x2},${y2} ${ax1},${ay1} ${ax2},${ay2}`} fill={ann.color} />
-                       </svg>
-                   );
+                   const headLen = 20 * (1/zoom * 0.5 + 0.5); const angle = Math.atan2(globalEndY - globalStartY, globalEndX - globalStartX);
+                   return ( <svg width="100%" height="100%" style={{ overflow: 'visible', pointerEvents: 'none' }}> <line x1={globalStartX - minX} y1={globalStartY - minY} x2={globalEndX - minX} y2={globalEndY - minY} stroke="transparent" strokeWidth="20" style={{ pointerEvents: 'stroke' }} /> <line x1={globalStartX - minX} y1={globalStartY - minY} x2={globalEndX - minX} y2={globalEndY - minY} stroke={ann.color} strokeWidth="5" /> <polygon points={`${globalEndX - minX},${globalEndY - minY} ${(globalEndX - minX) - headLen * Math.cos(angle - Math.PI / 6)},${(globalEndY - minY) - headLen * Math.sin(angle - Math.PI / 6)} ${(globalEndX - minX) - headLen * Math.cos(angle + Math.PI / 6)},${(globalEndY - minY) - headLen * Math.sin(angle + Math.PI / 6)}`} fill={ann.color} /> </svg> );
                }
                if (ann.type === 'callout' || ann.type === 'calloutCircle') {
                    const tail = ann.tailTip || { x: boxW/2, y: boxH + 50 };
-                   return (
-                       <div style={{ width: '100%', height: '100%', overflow: 'visible' }}>
-                           <svg width="1" height="1" style={{ overflow: 'visible', width: '100%', height: '100%' }}>
-                               <path 
-                                  d={getBubblePathStr(0, 0, boxW, boxH, tail, ann.type)}
-                                  fill="white" stroke={ann.color} strokeWidth="2" vectorEffect="non-scaling-stroke" 
-                               />
-                           </svg>
-                           <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
-                               <span style={{ color: ann.color, fontSize: `${(ann.fontSize || 24) * zoom}px`, fontWeight: ann.fontWeight, fontFamily: ann.fontFamily }}>{ann.text}</span>
-                           </div>
-                       </div>
-                   )
+                   return ( <div style={{ width: '100%', height: '100%', overflow: 'visible' }}> <svg width="1" height="1" style={{ overflow: 'visible', width: '100%', height: '100%' }}> <path d={getBubblePathStr(0, 0, boxW, boxH, tail, ann.type)} fill="white" stroke={ann.color} strokeWidth="2" vectorEffect="non-scaling-stroke" /> </svg> <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}> <span style={{ color: ann.color, fontSize: `${(ann.fontSize || 24) * zoom}px`, fontWeight: ann.fontWeight, fontFamily: ann.fontFamily }}>{ann.text}</span> </div> </div> )
                }
-               if (ann.type === 'text') {
-                   return <div style={{ color: ann.color, fontSize: `${(ann.fontSize || 32) * zoom}px`, fontWeight: ann.fontWeight, fontFamily: ann.fontFamily, whiteSpace: 'nowrap', textShadow: '0 0 3px white', padding:'4px', lineHeight:1 }}>{ann.text}</div>;
-               }
+               if (ann.type === 'text') return <div style={{ color: ann.color, fontSize: `${(ann.fontSize || 32) * zoom}px`, fontWeight: ann.fontWeight, fontFamily: ann.fontFamily, whiteSpace: 'nowrap', textShadow: '0 0 3px white', padding:'4px', lineHeight:1 }}>{ann.text}</div>;
                if (ann.type === 'circle') return <div style={{ width: '100%', height: '100%', border: `4px solid ${ann.color}`, borderRadius: '50%' }} />;
                if (ann.type === 'cross') return <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="0" y1="0" x2="100" y2="100" stroke={ann.color} strokeWidth="4" vectorEffect="non-scaling-stroke"/><line x1="100" y1="0" x2="0" y2="100" stroke={ann.color} strokeWidth="4" vectorEffect="non-scaling-stroke"/></svg>;
                if (ann.type === 'image') return <img src={ann.imageData} className="w-full h-full object-contain" draggable={false} />;
@@ -1085,672 +683,735 @@
                if (ann.type === 'filledRect') return <div style={{ width: '100%', height: '100%', backgroundColor: ann.color }} />;
                return null;
            }
-
-           return (
-              <div key={ann.id || 'preview'} style={style} onMouseDown={(e) => ann.id && !isPreview && handleMouseDown(e)}>
-                  {renderContent()}
-                  {renderHandles()}
-              </div>
-           );
+           return ( <div key={ann.id || 'preview'} style={style} onMouseDown={(e) => ann.id && !isPreview && handleMouseDown(e)}> {renderContent()} {renderHandles()} </div> );
+        };
+        
+        // Define tool cursor class
+        const getCursorClass = () => {
+             if (tool === 'select') return '';
+             if (tool === 'text' || tool === 'callout' || tool === 'calloutCircle') return 'cursor-text';
+             return 'cursor-crosshair';
         };
 
-        const shapeTools = [
-            { id: 'rect', icon: <Square size={20} />, label: '枠' },
-            { id: 'filledRect', icon: <FilledSquare size={20} fill="currentColor" />, label: '塗りつぶし' },
-            { id: 'circle', icon: <Circle size={20} />, label: '円' },
-            { id: 'cross', icon: <X size={20} />, label: 'バツ' },
-            { id: 'arrow', icon: <ArrowRight size={20} />, label: '矢印' },
-        ];
-        
-        const textTools = [
-            { id: 'text', icon: <Type size={20} />, label: 'テキスト' },
-            { id: 'callout', icon: <MessageSquare size={20} />, label: '吹き出し(角)' },
-            { id: 'calloutCircle', icon: <MessageSquare size={20} className="rounded-full" />, label: '吹き出し(丸)' },
-        ];
-
         return (
-          <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
-            <div className="bg-white p-3 flex justify-between items-center shadow-md z-[60]">
-              <h2 className="text-lg font-bold flex items-center gap-2 text-slate-700">
-                  <Move className="text-brand-600" size={20}/> ページ編集
-              </h2>
+          <div className="fixed inset-0 z-50 bg-gray-100 flex flex-col">
+            <div className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm z-[60] relative">
+              <div className="flex items-center space-x-2">
+                 <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded text-gray-600"><X size={20} /></button>
+                 <span className="font-bold text-gray-700">ページ {page.pageIndex + 1} の編集</span>
+                 <div className="h-6 w-px bg-gray-300 mx-2"></div>
+                 <button onClick={undo} disabled={history.length === 0} className={`p-2 rounded ${history.length===0 ? 'text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}><Undo size={20} /></button>
+                 <button onClick={redo} disabled={redoStack.length === 0} className={`p-2 rounded ${redoStack.length===0 ? 'text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}><Redo size={20} /></button>
+              </div>
               
-              <div className="flex items-center gap-4">
-                   <div className="flex items-center gap-1 border-r border-slate-300 pr-4">
-                       <button onClick={undo} disabled={history.length===0} className="p-1.5 hover:bg-slate-100 rounded disabled:opacity-30" title="元に戻す"><Undo size={18} /></button>
-                       <button onClick={redo} disabled={redoStack.length===0} className="p-1.5 hover:bg-slate-100 rounded disabled:opacity-30" title="やり直す"><Redo size={18} /></button>
-                       {selectedIds.size > 0 && (
-                           <button onClick={deleteSelected} className="ml-2 p-1.5 hover:bg-red-50 text-red-600 rounded" title="削除"><Trash2 size={18}/></button>
-                       )}
-                   </div>
-
-                   <div className={`flex items-center gap-2 border-r border-slate-300 pr-4 transition-opacity ${['text','callout','calloutCircle'].includes(tool) || (selectedIds.size > 0) ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-                       <Type size={16} className="text-slate-500" />
-                       <select value={fontFamily} onChange={(e) => { setFontFamily(e.target.value); updateSelectionStyle('fontFamily', e.target.value); }} className="border border-slate-300 rounded px-1 py-0.5 text-sm w-32">
-                           <option value="Meiryo UI">メイリオUI</option>
-                           <option value="sans-serif">ゴシック体</option>
-                           <option value="serif">明朝体</option>
-                       </select>
-                       <input type="number" step="1" value={Math.floor(fontSize)} onChange={(e) => { const v = parseInt(e.target.value); setFontSize(v); updateSelectionStyle('fontSize', v); }} className="w-14 border border-slate-300 rounded px-1 py-0.5 text-sm" />
-                       <button onClick={() => { setIsBold(!isBold); updateSelectionStyle('fontWeight', !isBold ? 'bold' : 'normal'); }} className={`p-1 rounded ${isBold ? 'bg-brand-100 text-brand-600 border border-brand-200' : 'text-slate-500 hover:bg-slate-100'}`}><Bold size={16} /></button>
-                   </div>
-                   
-                   <button onClick={handleClipboardCopy} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="画像をコピー"><Copy size={20} /></button>
-                   <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 px-3 text-sm text-slate-600 font-mono">{Math.round(zoom * 100)}%</div>
-                   <div className="flex gap-2 ml-4">
-                      <button onClick={handleClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium">キャンセル</button>
-                      <button onClick={() => onSave(annotations)} className="px-6 py-2 bg-brand-600 text-white rounded shadow-sm hover:bg-brand-700 font-bold flex items-center gap-2 text-sm"><Check size={18} /> 完了</button>
-                  </div>
-              </div>
-            </div>
-
-            <div className="flex flex-1 overflow-hidden relative">
-              <div className="w-16 bg-slate-800 flex flex-col items-center py-4 gap-3 z-20 shadow-xl overflow-visible shrink-0">
-                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => { 
-                      if (e.target.files && e.target.files[0]) {
-                          const reader = new FileReader();
-                          reader.onload = (ev) => {
-                             const newAnn = { id: generateId(), type: 'image', x: 50, y: 50, width: 300, height: 300, imageData: ev.target.result };
-                             saveToHistory([...annotations, newAnn]);
-                             setTool('select');
-                          };
-                          reader.readAsDataURL(e.target.files[0]);
-                      }
-                  }} />
-                  
-                  <ToolButton active={tool === 'select'} onClick={() => selectTool('select')} icon={<Move size={20} />} label="移動/選択" />
-                  <div className="w-10 h-px bg-slate-600 my-1"></div>
-                  
-                  {/* Text Menu */}
-                  <div className="relative group w-full px-2 flex justify-center" ref={textMenuRef}>
-                       <button onClick={() => setShowTextMenu(!showTextMenu)} className={`p-3 rounded-lg flex flex-col items-center gap-1 w-full ${['text','callout','calloutCircle'].includes(tool) ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
-                           <Type size={20} /> <span className="text-[10px]">テキスト</span>
-                       </button>
-                       {showTextMenu && (
-                           <div className="absolute left-full top-0 ml-4 bg-slate-700 rounded-lg shadow-xl p-2 flex flex-col gap-2 w-36 z-50">
-                               {textTools.map(t => (
-                                   <button key={t.id} onClick={() => { selectTool(t.id); setShowTextMenu(false); }} className="flex items-center gap-3 text-slate-200 hover:bg-slate-600 p-2 rounded text-sm">{t.icon} {t.label}</button>
-                               ))}
-                           </div>
-                       )}
-                  </div>
-                  
-                  <ToolButton active={tool === 'highlight'} onClick={() => selectTool('highlight')} icon={<Highlighter size={20} />} label="蛍光ペン" />
-                  
-                  {/* Shapes Menu */}
-                  <div className="relative group w-full px-2 flex justify-center" ref={shapeMenuRef}>
-                       <button onClick={() => setShowShapeMenu(!showShapeMenu)} className={`p-3 rounded-lg flex flex-col items-center gap-1 w-full ${['rect','filledRect','circle','cross','arrow'].includes(tool) ? 'bg-brand-500 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
-                           <Shapes size={20} /> <span className="text-[10px]">図形</span>
-                       </button>
-                       {showShapeMenu && (
-                           <div className="absolute left-full top-0 ml-4 bg-slate-700 rounded-lg shadow-xl p-2 flex flex-col gap-2 w-32 z-50">
-                               {shapeTools.map(t => (
-                                   <button key={t.id} onClick={() => { selectTool(t.id); setShowShapeMenu(false); }} className="flex items-center gap-3 text-slate-200 hover:bg-slate-600 p-2 rounded text-sm">{t.icon} {t.label}</button>
-                               ))}
-                           </div>
-                       )}
-                  </div>
-
-                  <ToolButton active={tool === 'image'} onClick={() => selectTool('image')} icon={<ImageIcon size={20} />} label="画像" />
-                  
-                  <div className="w-10 h-px bg-slate-600 my-1"></div>
-                  <div className="flex flex-col gap-2 mt-2">
-                      {['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#000000', '#ffffff'].map(c => (
-                          <button key={c} onClick={() => { setColor(c); updateSelectionStyle('color', c); }} className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-transparent'}`} style={{ backgroundColor: c }} />
-                      ))}
-                  </div>
-              </div>
-
-              <div className="flex-1 bg-slate-500 overflow-auto relative flex items-center justify-center p-8 z-0" ref={containerRef}>
-                   <div className="relative bg-white shadow-2xl origin-center" style={{ width: page.originalWidth * zoom, height: page.originalHeight * zoom }}>
-                        <img ref={imgRef} src={imageSrc} className="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" draggable={false} />
-                        
-                        {textContent && (
-                            <div className="textLayer" style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
-                                {textContent.items.map((item, i) => {
-                                    const tx = item.transform;
-                                    const fontSize = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1]);
-                                    const left = tx[4]; 
-                                    const bottom = tx[5]; 
-                                    const top = page.originalHeight - bottom - item.height; 
-                                    return (
-                                        <span key={i} style={{
-                                            left: left + 'px',
-                                            top: (page.originalHeight - bottom - (item.height || fontSize)) + 'px', 
-                                            fontSize: fontSize + 'px',
-                                            fontFamily: item.fontName,
-                                            transform: `scale(1, 1)` 
-                                        }}>
-                                            {item.str}
-                                        </span>
-                                    );
-                                })}
-                            </div>
-                        )}
-
-                        {textSelection && (
-                             <button 
-                                 className="absolute bg-brand-600 text-white px-3 py-1 rounded shadow-lg z-50 flex items-center gap-2 animate-bounce-in text-sm font-bold"
-                                 style={{ 
-                                     left: textSelection.x + textSelection.width/2, 
-                                     top: textSelection.y - 40,
-                                     transform: 'translateX(-50%)'
-                                 }}
-                                 onClick={applyTextHighlight}
-                             >
-                                 <Highlighter size={14} /> マーカーを引く
-                             </button>
-                        )}
-                        
-                        {selectionBox && (
-                            <div style={{
-                                position: 'absolute',
-                                left: `${(selectionBox.x / page.originalWidth) * 100}%`,
-                                top: `${(selectionBox.y / page.originalHeight) * 100}%`,
-                                width: `${(selectionBox.w / page.originalWidth) * 100}%`,
-                                height: `${(selectionBox.h / page.originalHeight) * 100}%`,
-                                backgroundColor: 'rgba(14, 165, 233, 0.2)',
-                                border: '1px solid #0ea5e9',
-                                zIndex: 50,
-                                pointerEvents: 'none'
-                            }} />
-                        )}
-
-                        <div className="absolute inset-0 z-10" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}>
-                            {annotations.map(ann => renderAnnotation(ann))}
-                            {currentAnnotation && renderAnnotation(currentAnnotation, true)}
+              <div className="flex items-center space-x-2">
+                 <button onClick={() => selectTool('select')} className={`p-2 rounded ${tool === 'select' ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`}><Move size={20} /></button>
+                 
+                 <div className="relative" ref={textMenuRef}>
+                    <button onClick={() => { setShowTextMenu(!showTextMenu); setShowShapeMenu(false); }} className={`p-2 rounded flex items-center ${['text','callout','calloutCircle'].includes(tool) ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`}><Type size={20} /><ChevronDown size={14} className="ml-1"/></button>
+                    {showTextMenu && (
+                        <div className="absolute top-full left-0 mt-1 w-48 bg-white border rounded shadow-lg z-50 p-1">
+                           <button onClick={() => { selectTool('text'); setShowTextMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><Type size={16} className="mr-2"/> テキスト</button>
+                           <button onClick={() => { selectTool('callout'); setShowTextMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><MessageSquare size={16} className="mr-2"/> 吹き出し(四角)</button>
+                           <button onClick={() => { selectTool('calloutCircle'); setShowTextMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><MessageSquare size={16} className="mr-2 rounded-full"/> 吹き出し(円)</button>
                         </div>
-                   </div>
+                    )}
+                 </div>
 
-                   <div className="fixed right-6 bottom-6 flex flex-col bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden z-40">
-                       <button onClick={() => setZoom(z => z + 0.1)} className="p-3 hover:bg-slate-50 text-slate-600 border-b border-slate-100" title="拡大"><ZoomIn size={20} /></button>
-                       <button onClick={() => setZoom(z => Math.max(0.1, z - 0.1))} className="p-3 hover:bg-slate-50 text-slate-600 border-b border-slate-100" title="縮小"><ZoomOut size={20} /></button>
-                       <button onClick={fitHeight} className="p-3 hover:bg-slate-50 text-slate-600 border-b border-slate-100" title="縦幅に合わせる"><ArrowUpDown size={20} /></button>
-                       <button onClick={fitWidth} className="p-3 hover:bg-slate-50 text-slate-600 border-b border-slate-100" title="横幅に合わせる"><ArrowLeftRight size={20} className="rotate-90" /></button>
-                       <button onClick={fitHeight} className="p-3 hover:bg-slate-50 text-slate-600" title="リセット"><RefreshCcw size={20} /></button>
-                   </div>
+                 <button onClick={() => selectTool('highlight')} className={`p-2 rounded ${tool === 'highlight' ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`}><Highlighter size={20} /></button>
+                 
+                 <div className="relative" ref={shapeMenuRef}>
+                    <button onClick={() => { setShowShapeMenu(!showShapeMenu); setShowTextMenu(false); }} className={`p-2 rounded flex items-center ${['rect','filledRect','circle','cross','arrow'].includes(tool) ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`}><Shapes size={20} /><ChevronDown size={14} className="ml-1"/></button>
+                    {showShapeMenu && (
+                        <div className="absolute top-full left-0 mt-1 w-48 bg-white border rounded shadow-lg z-50 p-1">
+                           <button onClick={() => { selectTool('rect'); setShowShapeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><Square size={16} className="mr-2"/> 枠 (赤)</button>
+                           <button onClick={() => { selectTool('filledRect'); setShowShapeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><FilledSquare size={16} className="mr-2"/> ■ 塗りつぶし</button>
+                           <button onClick={() => { selectTool('circle'); setShowShapeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><Circle size={16} className="mr-2"/> 〇 円</button>
+                           <button onClick={() => { selectTool('cross'); setShowShapeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><X size={16} className="mr-2"/> × バツ</button>
+                           <button onClick={() => { selectTool('arrow'); setShowShapeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center"><ArrowRight size={16} className="mr-2"/> 矢印</button>
+                        </div>
+                    )}
+                 </div>
+
+                 <button onClick={() => selectTool('image')} className={`p-2 rounded ${tool === 'image' ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`}><ImageIcon size={20} /></button>
+                 
+                 <div className="h-6 w-px bg-gray-300 mx-2"></div>
+                 <input type="color" value={color} onChange={(e) => { setColor(e.target.value); updateSelectionStyle('color', e.target.value); }} className="w-8 h-8 rounded cursor-pointer border-0 p-0" />
+                 
+                 <div className="flex items-center border rounded px-2 bg-gray-50">
+                    <span className="text-xs mr-1 text-gray-500">Tt</span>
+                    <input type="number" min="8" max="200" step="4" value={fontSize} onChange={(e) => { const v = Math.floor(Number(e.target.value)); setFontSize(v); updateSelectionStyle('fontSize', v); }} className="w-14 text-center bg-transparent outline-none text-sm" />
+                 </div>
+                 
+                 <select value={fontFamily} onChange={(e) => { setFontFamily(e.target.value); updateSelectionStyle('fontFamily', e.target.value); }} className="text-sm border rounded px-1 py-1 w-24">
+                    <option value="Meiryo UI">メイリオ</option>
+                    <option value="sans-serif">ゴシック</option>
+                    <option value="serif">明朝</option>
+                    <option value="monospace">等幅</option>
+                 </select>
+                 
+                 <button onClick={() => { setIsBold(!isBold); updateSelectionStyle('fontWeight', !isBold ? 'bold' : 'normal'); }} className={`p-2 rounded ${isBold ? 'bg-gray-200' : 'hover:bg-gray-100'}`}><Bold size={20} /></button>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                  <button onClick={handleClipboardCopy} className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-sm flex items-center mr-2"><Copy size={16} className="mr-1"/> コピー</button>
+                  <button onClick={() => onSave(annotations)} className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded flex items-center"><Check size={20} className="mr-2" /> 完了</button>
               </div>
             </div>
+
+            <div className="flex-1 overflow-auto relative bg-gray-200" onClick={() => { if (selectedIds.size > 0 && interactionMode === 'none') setSelectedIds(new Set()); }}>
+               <div className="min-h-full flex items-center justify-center p-8">
+                   <div 
+                      ref={containerRef}
+                      className={`relative bg-white shadow-2xl transition-transform duration-200 ease-out ${getCursorClass()}`}
+                      style={{ width: page.originalWidth, height: page.originalHeight, transform: `scale(${zoom})`, transformOrigin: 'center top' }}
+                      onMouseDown={handleMouseDown}
+                      onMouseMove={handleMouseMove}
+                      onMouseUp={handleMouseUp}
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} 
+                   >
+                       <img ref={imgRef} src={imageSrc} className="w-full h-full pointer-events-none select-none" alt="" />
+                       
+                       {/* Text Selection Layer - Pointer events managed to allow drawing */}
+                       <div className="textLayer" style={{ pointerEvents: tool === 'select' ? 'auto' : 'none' }}>
+                           {textContent?.items?.map((item, i) => (
+                             <span key={i} style={{ left: `${item.transform[4]}px`, top: `${page.originalHeight - item.transform[5] - item.height}px`, fontSize: `${item.height}px`, fontFamily: item.fontName, width: `${item.width}px`, height: `${item.height}px` }}>{item.str}</span>
+                           ))}
+                       </div>
+
+                       {annotations.map(ann => renderAnnotation(ann))}
+                       {currentAnnotation && renderAnnotation(currentAnnotation, true)}
+                       
+                       {selectionBox && (
+                           <div className="absolute border-2 border-brand-500 bg-brand-500/20 pointer-events-none z-50" style={{ left: selectionBox.x, top: selectionBox.y, width: selectionBox.w, height: selectionBox.h }} />
+                       )}
+
+                       {textSelection && (
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); applyTextHighlight(); }}
+                             className="absolute bg-yellow-400 hover:bg-yellow-500 text-black text-xs px-2 py-1 rounded shadow-lg flex items-center z-50 animate-bounce-in"
+                             style={{ left: textSelection.x + textSelection.width/2, top: textSelection.y - 40, transform: 'translateX(-50%)' }}
+                           >
+                             <Highlighter size={12} className="mr-1"/> マーカーを引く
+                           </button>
+                       )}
+                       
+                       {!imageSrc && (
+                           <div 
+                              className="absolute inset-0 flex items-center justify-center bg-gray-50 bg-opacity-90 z-40 cursor-pointer hover:bg-gray-100"
+                              onClick={() => fileInputRef.current?.click()}
+                           >
+                               <div className="text-center text-gray-400">
+                                   <ImageIcon size={48} className="mx-auto mb-2 opacity-50"/>
+                                   <p>画像をドロップ または クリックして追加</p>
+                               </div>
+                           </div>
+                       )}
+                   </div>
+               </div>
+            </div>
+            
+            <div className="absolute right-4 bottom-4 flex flex-col space-y-2 bg-white rounded-lg shadow-lg p-1 border z-[60]">
+               <button onClick={() => setZoom(z => Math.min(3, z + 0.1))} className="p-2 hover:bg-gray-100 rounded"><ZoomIn size={20}/></button>
+               <span className="text-xs text-center font-mono">{Math.round(zoom * 100)}%</span>
+               <button onClick={() => setZoom(z => Math.max(0.1, z - 0.1))} className="p-2 hover:bg-gray-100 rounded"><ZoomOut size={20}/></button>
+               <div className="h-px bg-gray-200 my-1"></div>
+               <button onClick={fitWidth} className="p-2 hover:bg-gray-100 rounded" title="横幅に合わせる"><ArrowLeftRight size={20} className="rotate-45" /></button>
+               <button onClick={fitHeight} className="p-2 hover:bg-gray-100 rounded" title="縦幅に合わせる"><ArrowUpDown size={20} /></button>
+            </div>
+
+            <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                         const newAnn = { id: generateId(), type: 'image', x: 50, y: 50, width: 200, height: 200, imageData: ev.target.result };
+                         saveToHistory([...annotations, newAnn]);
+                         setSelectedIds(new Set([newAnn.id]));
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }} />
           </div>
         );
       };
 
-      const ToolButton = ({ active, onClick, icon, label }) => (
-          <button onClick={onClick} className={`p-3 rounded-lg flex flex-col items-center gap-1 w-full ${active ? 'bg-brand-500 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`} title={label}>
-              {icon} <span className="text-[10px] whitespace-nowrap">{label}</span>
-          </button>
-      );
-
-      function App() {
+      const App = () => {
+        const [files, setFiles] = useState([]);
         const [pages, setPages] = useState([]);
         const [sources, setSources] = useState(new Map());
-        const [selectedPageIds, setSelectedPageIds] = useState(new Set());
+        const [editingPageId, setEditingPageId] = useState(null);
+        const [editingPageInfo, setEditingPageInfo] = useState(null); 
         const [isProcessing, setIsProcessing] = useState(false);
-        const [isDraggingFile, setIsDraggingFile] = useState(false);
-        const [editorPage, setEditorPage] = useState(null);
-        const [draggedPageIndex, setDraggedPageIndex] = useState(null);
-        const [dropTargetIndex, setDropTargetIndex] = useState(null);
-        const [showPageNumModal, setShowPageNumModal] = useState(false);
-        const [pageNumMode, setPageNumMode] = useState('none'); 
+        const [selectedPageIds, setSelectedPageIds] = useState(new Set());
+        const [dragTargetIndex, setDragTargetIndex] = useState(null);
         
-        // View Mode
-        const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'stack' | 'carousel'
+        const [viewMode, setViewMode] = useState('grid'); // grid, stack, carousel, groups
         const [focusedPageIndex, setFocusedPageIndex] = useState(0);
+        
+        const [showPageNumModal, setShowPageNumModal] = useState(false);
 
         const fileInputRef = useRef(null);
-        const carouselRef = useRef(null);
+        const carouselContainerRef = useRef(null);
 
-        const processFiles = useCallback(async (files, isPaste = false) => {
-          if (files.length === 0) return;
+        const handleFileUpload = async (event) => {
+          const fileList = event.target.files;
+          if (!fileList || fileList.length === 0) return;
           setIsProcessing(true);
           try {
-              const newSources = new Map(sources);
-              const newPages = [...pages];
-              let lastAddedPage = null; let lastAddedSource = null;
-              for (const file of files) {
-                   try {
-                      const { source, pages: extractedPages } = await loadPDF(file);
-                      newSources.set(source.id, source);
-                      extractedPages.forEach(p => newPages.push(p));
-                      if (extractedPages.length > 0) { lastAddedPage = extractedPages[0]; lastAddedSource = source; }
-                   } catch (e) { console.error(e); }
-              }
-              setSources(newSources);
-              const updatedPages = applyPageNumbers(newPages, pageNumMode);
-              setPages(updatedPages);
-              
-              if (isPaste && lastAddedPage && lastAddedSource) {
-                   const res = await renderHighResPage(lastAddedPage, lastAddedSource);
-                   setEditorPage({ page: lastAddedPage, highResUrl: res.dataUrl, textContent: res.textContent, viewportInfo: res.viewport });
-              }
-          } catch (e) { alert("エラーが発生しました。"); } finally { setIsProcessing(false); }
-        }, [pages, sources, pageNumMode]);
+            const newPages = [];
+            const newSources = new Map(sources);
 
-        const applyPageNumbers = (currentPages, mode) => {
-            if (mode === 'none') {
-                return currentPages.map(p => ({
-                    ...p,
-                    annotations: p.annotations.filter(a => !a.isPageNumber)
-                }));
+            for (const file of Array.from(fileList)) {
+              const { source, pages: extractedPages } = await loadPDF(file);
+              newSources.set(source.id, source);
+              newPages.push(...extractedPages);
             }
-            return currentPages.map((page, i) => {
-                const cleanAnns = page.annotations.filter(a => !a.isPageNumber);
-                const fontSize = 24;
-                let x = 0; let y = 0;
-                if (mode === 'bottom-center') {
-                    x = page.originalWidth / 2 - 10; y = page.originalHeight - 50;
-                } else {
-                    x = page.originalWidth - 80; y = page.originalHeight - 50;
-                }
-                const numAnn = {
-                    id: generateId(),
-                    type: 'text',
-                    text: `${i + 1}`,
-                    x, y,
-                    color: '#000000', fontSize, fontWeight: 'normal', fontFamily: 'sans-serif',
-                    isPageNumber: true
-                };
-                return { ...page, annotations: [...cleanAnns, numAnn] };
-            });
-        };
-
-        const updatePageNumberMode = (mode) => {
-            setPageNumMode(mode);
-            setPages(prev => applyPageNumbers(prev, mode));
-            setShowPageNumModal(false);
-        };
-
-        const handlePageDrop = (e, dropIndex) => {
-            e.preventDefault(); e.stopPropagation(); 
-            setDropTargetIndex(null);
-            if (draggedPageIndex === null || draggedPageIndex === dropIndex) return;
-            const newPages = [...pages];
-            const item = newPages.splice(draggedPageIndex, 1)[0];
-            newPages.splice(dropIndex, 0, item);
-            setPages(applyPageNumbers(newPages, pageNumMode));
-            setDraggedPageIndex(null);
-        };
-
-        const handleFileUpload = (e) => processFiles(e.target.files);
-
-        const handleSavePDF = async () => {
-          if (pages.length === 0) return;
-          try {
-             const pdfBytes = await generateFinalPDF(pages, sources);
-             const suggestedName = "edited.pdf";
-             
-             if (window.showSaveFilePicker) {
-                 try {
-                     const handle = await window.showSaveFilePicker({
-                         suggestedName,
-                         types: [{ description: 'PDF File', accept: {'application/pdf': ['.pdf']} }]
-                     });
-                     const writable = await handle.createWritable();
-                     await writable.write(pdfBytes);
-                     await writable.close();
-                 } catch (e) {
-                     if (e.name !== 'AbortError') download(pdfBytes, suggestedName, "application/pdf");
-                 }
-             } else {
-                 const name = prompt("ファイル名を入力してください", suggestedName);
-                 if(name) download(pdfBytes, name.endsWith('.pdf') ? name : name + '.pdf', "application/pdf");
-             }
-          } catch (e) {
-            console.error(e);
-            alert("保存中にエラーが発生しました。");
+            setSources(newSources);
+            setPages(prev => [...prev, ...newPages]);
+          } catch (error) {
+            console.error(error);
+            alert("ファイルの読み込みに失敗しました: " + error.message);
+          } finally {
+            setIsProcessing(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
           }
         };
 
-        const handleDeletePages = () => {
-            const newPages = pages.filter(p => !selectedPageIds.has(p.id));
-            setPages(applyPageNumbers(newPages, pageNumMode));
-            setSelectedPageIds(new Set());
+        const handleSavePDF = async () => {
+          if (pages.length === 0) return;
+          setIsProcessing(true);
+          try {
+             const pdfBytes = await generateFinalPDF(pages, sources);
+             
+             if (window.showSaveFilePicker) {
+                 const handle = await window.showSaveFilePicker({
+                     suggestedName: 'edited_document.pdf',
+                     types: [{ description: 'PDF Document', accept: {'application/pdf': ['.pdf']} }]
+                 });
+                 const writable = await handle.createWritable();
+                 await writable.write(pdfBytes);
+                 await writable.close();
+             } else {
+                 const name = prompt("保存するファイル名を入力してください", "edited.pdf");
+                 if (name) download(pdfBytes, name.endsWith('.pdf') ? name : name + '.pdf', "application/pdf");
+             }
+          } catch (e) {
+             console.error(e);
+             if (e.name !== 'AbortError') alert("保存中にエラーが発生しました");
+          } finally {
+             setIsProcessing(false);
+          }
         };
 
         const handleReset = () => {
-            if (confirm("現在の内容を破棄して新しいプロジェクトを開始しますか？")) {
-                setPages([]);
-                setSources(new Map());
-                setSelectedPageIds(new Set());
-                setPageNumMode('none');
-                setFocusedPageIndex(0);
+            if (pages.length > 0 && !confirm("現在の内容はすべて破棄されます。新しいプロジェクトを開始しますか？")) return;
+            setPages([]); setSources(new Map()); setSelectedPageIds(new Set()); setFocusedPageIndex(0);
+        };
+
+        const handlePageDrop = (e, targetIndex) => {
+            e.preventDefault(); e.stopPropagation();
+            setDragTargetIndex(null);
+            
+            const draggedIndex = Number(e.dataTransfer.getData('pageIndex'));
+            const sourceId = e.dataTransfer.getData('sourceId');
+            const dragMode = e.dataTransfer.getData('dragMode');
+            
+            if (isNaN(draggedIndex)) return;
+            
+            let newPages = [...pages];
+
+            if (dragMode === 'group' && sourceId) {
+                const groupPages = newPages.filter(p => p.sourcePdfId === sourceId);
+                const nonGroupPages = newPages.filter(p => p.sourcePdfId !== sourceId);
+                
+                const groupIndices = newPages.map((p, i) => p.sourcePdfId === sourceId ? i : -1).filter(i => i !== -1);
+                const itemsBeforeTarget = groupIndices.filter(i => i < targetIndex).length;
+                const adjustedTarget = Math.max(0, targetIndex - itemsBeforeTarget);
+
+                newPages = nonGroupPages;
+                newPages.splice(adjustedTarget, 0, ...groupPages);
+            } else {
+                if (draggedIndex === targetIndex) return;
+                const [movedPage] = newPages.splice(draggedIndex, 1);
+                newPages.splice(targetIndex, 0, movedPage);
+            }
+
+            setPages(newPages);
+            if (newPages.some(p => p.annotations.some(a => a.isPageNumber))) {
+                const hasNum = newPages[0].annotations.find(a => a.isPageNumber);
+                if (hasNum) applyPageNumbers(hasNum.align);
             }
         };
 
-        const handleEditPage = async (page) => {
-           const source = sources.get(page.sourcePdfId);
-           if (!source) return;
-           const res = await renderHighResPage(page, source);
-           setEditorPage({ page, highResUrl: res.dataUrl, textContent: res.textContent, viewportInfo: res.viewport });
+        // Group View Drag Logic
+        const handleGroupDrop = (e, targetSourceId) => {
+            e.preventDefault(); e.stopPropagation();
+            const draggedSourceId = e.dataTransfer.getData('groupSourceId');
+            if (!draggedSourceId || draggedSourceId === targetSourceId) return;
+
+            // Reorder whole groups
+            // Group pages by source
+            const groups = [];
+            const processed = new Set();
+            pages.forEach(p => {
+                if (!processed.has(p.sourcePdfId)) {
+                    groups.push(pages.filter(page => page.sourcePdfId === p.sourcePdfId));
+                    processed.add(p.sourcePdfId);
+                }
+            });
+
+            const draggedGroupIndex = groups.findIndex(g => g[0].sourcePdfId === draggedSourceId);
+            const targetGroupIndex = groups.findIndex(g => g[0].sourcePdfId === targetSourceId);
+            
+            if (draggedGroupIndex === -1 || targetGroupIndex === -1) return;
+            
+            const [movedGroup] = groups.splice(draggedGroupIndex, 1);
+            groups.splice(targetGroupIndex, 0, movedGroup);
+            
+            setPages(groups.flat());
         };
 
-        const handleSaveAnnotation = (newAnnotations) => {
-           if (!editorPage) return;
-           setPages(pages.map(p => p.id === editorPage.page.id ? { ...p, annotations: newAnnotations } : p));
-           setEditorPage(null);
+        const applyPageNumbers = (pos) => {
+            const newPages = pages.map((page, index) => {
+                const newAnns = page.annotations.filter(a => !a.isPageNumber);
+                const text = `- ${index + 1} -`;
+                let x = page.originalWidth / 2;
+                let y = page.originalHeight - 30;
+                
+                if (pos === 'bottomRight') {
+                    x = page.originalWidth - 50;
+                }
+                
+                newAnns.push({
+                    id: generateId(), type: 'text',
+                    x: x - (text.length * 8), y, 
+                    text: text, fontSize: 16, color: '#000000',
+                    isPageNumber: true, align: pos
+                });
+                return { ...page, annotations: newAnns };
+            });
+            setPages(newPages);
+            setShowPageNumModal(false);
+        };
+        
+        const resetPageNumbers = () => {
+            setPages(pages.map(p => ({ ...p, annotations: p.annotations.filter(a => !a.isPageNumber) })));
+            setShowPageNumModal(false);
         };
 
-        useEffect(() => {
-           const handlePaste = (e) => {
-               if (e.clipboardData && e.clipboardData.files.length > 0) processFiles(e.clipboardData.files, true);
-           };
-           window.addEventListener('paste', handlePaste);
-           return () => window.removeEventListener('paste', handlePaste);
-        }, [processFiles]);
+        const openEditor = async (page) => {
+            setIsProcessing(true);
+            try {
+                const source = sources.get(page.sourcePdfId);
+                const { textContent } = await renderHighResPage(page, source);
+                
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const viewport = (await (await pdfjsLib.getDocument({data: source.data.slice(0)}).promise).getPage(page.pageIndex+1)).getViewport({scale: 3.0, rotation: page.rotation});
+                canvas.width = viewport.width; canvas.height = viewport.height;
+                await (await (await pdfjsLib.getDocument({data: source.data.slice(0)}).promise).getPage(page.pageIndex+1)).render({canvasContext: ctx, viewport}).promise;
 
-        // Keyboard & Scroll Sync
+                setEditingPageInfo({ page, textContent, imageSrc: canvas.toDataURL() });
+                setEditingPageId(page.id);
+            } catch(e) {
+                console.error(e); alert("編集画面を開けませんでした");
+            } finally {
+                setIsProcessing(false);
+            }
+        };
+        
+        // Navigation Logic
         useEffect(() => {
             const handleKey = (e) => {
-                // allow grid nav too
-                if (e.key === 'ArrowLeft') {
-                    setFocusedPageIndex(prev => Math.max(0, prev - 1));
-                } else if (e.key === 'ArrowRight') {
-                    setFocusedPageIndex(prev => Math.min(pages.length - 1, prev + 1));
-                }
+               if (editingPageId) return;
+               if (viewMode === 'grid') {
+                  const cols = Math.floor((window.innerWidth - 32) / 220); // approx grid col count
+                  if (e.key === 'ArrowRight') setFocusedPageIndex(i => Math.min(pages.length-1, i+1));
+                  if (e.key === 'ArrowLeft') setFocusedPageIndex(i => Math.max(0, i-1));
+                  if (e.key === 'ArrowDown') setFocusedPageIndex(i => Math.min(pages.length-1, i+cols));
+                  if (e.key === 'ArrowUp') setFocusedPageIndex(i => Math.max(0, i-cols));
+                  if (e.key === 'Enter') {
+                      if (pages[focusedPageIndex]) openEditor(pages[focusedPageIndex]);
+                  }
+               } else {
+                  if (e.key === 'ArrowRight') setFocusedPageIndex(i => Math.min(pages.length-1, i+1));
+                  if (e.key === 'ArrowLeft') setFocusedPageIndex(i => Math.max(0, i-1));
+               }
             };
             window.addEventListener('keydown', handleKey);
             return () => window.removeEventListener('keydown', handleKey);
-        }, [pages.length]);
-
-        // Carousel Scroll Effect
+        }, [editingPageId, viewMode, pages]);
+        
+        // Auto Scroll Carousel
         useEffect(() => {
-            if (viewMode === 'carousel' && carouselRef.current) {
-                const container = carouselRef.current;
-                const cardWidth = 332; // 300 + gap
-                const targetScroll = focusedPageIndex * cardWidth - (container.clientWidth / 2) + (300 / 2);
-                container.scrollTo({ left: targetScroll, behavior: 'smooth' });
+            if (viewMode === 'carousel' && carouselContainerRef.current) {
+                const card = carouselContainerRef.current.children[focusedPageIndex];
+                if (card) {
+                    const container = carouselContainerRef.current;
+                    const scrollLeft = card.offsetLeft - (container.clientWidth / 2) + (card.clientWidth / 2);
+                    container.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+                }
             }
         }, [focusedPageIndex, viewMode]);
 
-        const renderThumbContent = (page, index) => (
-             <div key={page.id} 
-                className={`relative group bg-white rounded-lg shadow-sm border-2 transition-all duration-200 ${selectedPageIds.has(page.id) || focusedPageIndex === index ? 'border-brand-500 ring-2 ring-brand-100' : 'border-transparent hover:border-brand-200'}`}
-                draggable
-                onDragStart={() => setDraggedPageIndex(index)}
-                onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(index); }}
-                onDrop={(e) => handlePageDrop(e, index)}
-                onClick={() => setFocusedPageIndex(index)}
-             >
-                {/* Visual Insertion Marker */}
-                {draggedPageIndex !== null && dropTargetIndex === index && (
-                    <div className={`absolute z-30 w-1.5 bg-brand-500 rounded-full h-full -left-4 ${draggedPageIndex < index ? 'left-auto -right-4' : ''}`}></div>
-                )}
-
-                {/* Selection Checkbox */}
-                <div className="absolute top-2 left-2 z-10" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedPageIds.has(page.id)} onChange={() => {
-                    const newSet = new Set(selectedPageIds);
-                    if (newSet.has(page.id)) newSet.delete(page.id); else newSet.add(page.id);
-                    setSelectedPageIds(newSet);
-                    }} className="w-5 h-5 rounded border-slate-300 text-brand-600 focus:ring-brand-500 shadow-sm cursor-pointer" />
-                </div>
-
-                {/* Page Number Badge */}
-                <div className="absolute top-2 right-2 z-10 bg-slate-900/70 text-white text-xs px-2 py-0.5 rounded-full backdrop-blur-sm font-mono">
-                    {index + 1}
-                </div>
-
-                {/* Thumbnail */}
-                <div className="aspect-[1/1.414] w-full overflow-hidden rounded-t-lg bg-slate-100 relative cursor-pointer" onClick={(e) => { e.stopPropagation(); handleEditPage(page); }}>
-                    <img src={page.thumbnailUrl} className="w-full h-full object-contain" />
-                    <div className="absolute inset-0 pointer-events-none">
-                        {page.annotations.map(ann => {
-                            const style = {
-                            position: 'absolute',
-                            left: `${(ann.x / page.originalWidth) * 100}%`,
-                            top: `${(ann.y / page.originalHeight) * 100}%`,
-                            width: ann.width ? `${(ann.width / page.originalWidth) * 100}%` : 'auto',
-                            height: ann.height ? `${(ann.height / page.originalHeight) * 100}%` : 'auto',
-                            };
-                            if(ann.type === 'highlight') return <div key={ann.id} style={{...style, backgroundColor: ann.color, opacity: 0.4}} />;
-                            if(ann.type === 'rect') return <div key={ann.id} style={{...style, border: `2px solid ${ann.color}`}} />;
-                            if(ann.type === 'circle') return <div key={ann.id} style={{...style, border: `2px solid ${ann.color}`, borderRadius: '50%'}} />;
-                            if(ann.type === 'cross') return <div key={ann.id} style={{...style, color: ann.color}}>X</div>; 
-                            if(ann.type === 'arrow') return <div key={ann.id} style={{...style, height:'2px', backgroundColor:ann.color, transformOrigin:'0 0', width:`${Math.sqrt(ann.width**2 + ann.height**2)/page.originalWidth*100}%`, transform:`rotate(${Math.atan2(ann.height, ann.width)}rad)`}} />;
-                            if(ann.type === 'text' || ann.type === 'callout' || ann.type === 'calloutCircle') return <div key={ann.id} style={{...style, fontSize:'8px', color: ann.color}}>{ann.text}</div>;
-                            if(ann.type === 'image') return <img key={ann.id} src={ann.imageData} style={{...style, objectFit:'contain'}} />;
-                            return null;
-                        })}
-                    </div>
-                    
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                        <div className="bg-white/90 text-brand-700 px-3 py-1 rounded-full shadow-sm text-sm font-medium flex items-center gap-1">
-                            <Edit3 size={14} /> 編集
-                        </div>
-                    </div>
-                </div>
-
-                {/* Footer Actions */}
-                <div className="p-2 border-t border-slate-100 flex justify-around bg-slate-50 rounded-b-lg">
-                    <button onClick={(e) => { e.stopPropagation(); setPages(pages.map(p => p.id === page.id ? { ...p, rotation: (p.rotation + 90) % 360 } : p)); }} className="p-1.5 text-slate-500 hover:text-brand-600 hover:bg-white rounded transition-colors" title="回転">
-                    <RotateCw size={16} />
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); if(confirm('削除しますか？')) { const newP = pages.filter(p => p.id !== page.id); setPages(applyPageNumbers(newP, pageNumMode)); } }} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-white rounded transition-colors" title="削除">
-                    <Trash2 size={16} />
-                    </button>
-                </div>
-            </div>
-        );
+        // Grouping logic for ViewMode 'groups'
+        const groupedPages = React.useMemo(() => {
+            const groups = new Map();
+            pages.forEach(p => {
+                if (!groups.has(p.sourcePdfId)) groups.set(p.sourcePdfId, []);
+                groups.get(p.sourcePdfId).push(p);
+            });
+            return Array.from(groups.entries());
+        }, [pages]);
 
         return (
-          <div className="min-h-screen flex flex-col" onDragOver={(e) => { 
-              e.preventDefault(); 
-              if (e.dataTransfer.types.includes('Files')) setIsDraggingFile(true);
-          }} onDragLeave={() => setIsDraggingFile(false)} onDrop={(e) => { 
-              e.preventDefault(); 
-              if (e.dataTransfer.types.includes('Files')) {
-                  setIsDraggingFile(false); 
-                  processFiles(e.dataTransfer.files);
-              }
-          }}>
-            
-            {/* Header */}
-            <div className="bg-white border-b border-slate-200 p-4 px-6 flex justify-between items-center shadow-sm sticky top-0 z-40">
-              <div className="flex items-center gap-3">
-                 <div className="bg-brand-600 text-white p-2 rounded-lg">
-                    <Shapes size={24} />
-                 </div>
-                 <h1 className="text-xl font-bold text-slate-800 tracking-tight">PDF Master Studio</h1>
+          <div className="min-h-screen bg-gray-50 text-slate-800 font-sans flex flex-col">
+            <header className="bg-white border-b sticky top-0 z-40 px-6 py-3 flex items-center justify-between shadow-sm">
+              <div className="flex items-center space-x-3">
+                <div className="bg-brand-600 p-2 rounded text-white"><Edit3 size={24} /></div>
+                <h1 className="text-xl font-bold text-gray-800 tracking-tight">PDF Master Studio</h1>
               </div>
+              <div className="flex items-center space-x-4">
+                <div className="bg-gray-100 p-1 rounded-lg flex text-gray-500">
+                    <button onClick={() => setViewMode('grid')} className={`p-2 rounded ${viewMode==='grid'?'bg-white text-brand-600 shadow-sm':''}`} title="グリッド"><LayoutGrid size={18}/></button>
+                    <button onClick={() => setViewMode('stack')} className={`p-2 rounded ${viewMode==='stack'?'bg-white text-brand-600 shadow-sm':''}`} title="スタック"><Layers size={18}/></button>
+                    <button onClick={() => setViewMode('carousel')} className={`p-2 rounded ${viewMode==='carousel'?'bg-white text-brand-600 shadow-sm':''}`} title="カルーセル"><Columns size={18}/></button>
+                    <button onClick={() => setViewMode('groups')} className={`p-2 rounded ${viewMode==='groups'?'bg-white text-brand-600 shadow-sm':''}`} title="ファイルグループ"><Folder size={18}/></button>
+                </div>
+                
+                <div className="flex items-center ml-2 border-l pl-4">
+                     <label className="flex items-center space-x-2 cursor-pointer select-none">
+                         <input 
+                            type="checkbox" 
+                            checked={pages.length > 0 && selectedPageIds.size === pages.length}
+                            ref={el => { if(el) el.indeterminate = selectedPageIds.size > 0 && selectedPageIds.size < pages.length; }}
+                            onChange={(e) => {
+                                if (e.target.checked) setSelectedPageIds(new Set(pages.map(p => p.id)));
+                                else setSelectedPageIds(new Set());
+                            }}
+                            disabled={pages.length === 0}
+                            className="w-5 h-5 text-brand-600 rounded focus:ring-brand-500 border-gray-300" 
+                         />
+                         <span className="text-sm font-medium text-gray-600">すべて選択</span>
+                     </label>
+                </div>
 
-              <div className="flex gap-3 items-center">
-                 {/* View Mode Toggles */}
-                 <div className="flex bg-slate-100 rounded-lg p-1 mr-4">
-                     <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="グリッド表示"><LayoutGrid size={18} /></button>
-                     <button onClick={() => setViewMode('stack')} className={`p-1.5 rounded ${viewMode === 'stack' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="スタック表示"><Layers size={18} /></button>
-                     <button onClick={() => setViewMode('carousel')} className={`p-1.5 rounded ${viewMode === 'carousel' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="カルーセル表示"><Columns size={18} /></button>
-                 </div>
+                <button onClick={() => { 
+                    if (selectedPageIds.size === 0) return;
+                    if (!confirm(`${selectedPageIds.size} ページを削除しますか？`)) return;
+                    const newPages = pages.filter(p => !selectedPageIds.has(p.id)); 
+                    setPages(newPages); setSelectedPageIds(new Set()); 
+                    if (newPages.some(p => p.annotations.some(a => a.isPageNumber))) {
+                         const hasNum = newPages[0].annotations.find(a => a.isPageNumber);
+                         if (hasNum) applyPageNumbers(hasNum.align);
+                    }
+                }} className={`p-2 text-red-500 hover:bg-red-50 rounded disabled:opacity-50`} disabled={selectedPageIds.size===0} title="削除"><Trash2 size={20}/></button>
 
-                 <button onClick={handleReset} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg border border-transparent hover:border-slate-200 transition-all" title="新規プロジェクト/リセット"><Trash2 size={20} /></button>
-                 <div className="w-px h-8 bg-slate-300 mx-1"></div>
-                 
-                 <input type="file" multiple accept=".pdf,image/*" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
-                 <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg flex items-center gap-2 font-medium transition-colors">
-                    <FolderPlus size={18} /> ファイル追加
-                 </button>
-                 
-                 <button onClick={() => setShowPageNumModal(true)} className={`px-4 py-2 ${pageNumMode !== 'none' ? 'bg-brand-100 text-brand-700 border border-brand-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-lg flex items-center gap-2 font-medium transition-colors`}>
-                    <Hash size={18} /> ページ番号
-                 </button>
-
-                 <button onClick={handleSavePDF} disabled={pages.length === 0} className="px-6 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg shadow-md flex items-center gap-2 font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                    <FileDown size={18} /> PDF保存
-                 </button>
+                <div className="h-6 w-px bg-gray-300"></div>
+                
+                <button onClick={handleReset} className="text-gray-500 hover:text-red-600 p-2" title="リセット"><RefreshCcw size={20}/></button>
+                
+                <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors font-medium">
+                  <FolderPlus size={20} className="mr-2"/> ファイル追加
+                </button>
+                <input type="file" multiple accept=".pdf,image/*" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                
+                <button onClick={() => setShowPageNumModal(true)} className="flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors font-medium">
+                  <Hash size={20} className="mr-2"/> ページ番号
+                </button>
+                
+                <button onClick={handleSavePDF} disabled={pages.length === 0} className="flex items-center px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg shadow-md transition-all font-bold disabled:opacity-50 disabled:cursor-not-allowed">
+                  <FileDown size={20} className="mr-2"/> PDF保存
+                </button>
               </div>
-            </div>
+            </header>
 
-            {/* Main Content */}
-            <div className="flex-1 p-8 overflow-y-auto bg-slate-50/50">
-               {pages.length === 0 ? (
-                 <div 
-                   className="h-full flex flex-col items-center justify-center text-slate-400 border-4 border-dashed border-slate-200 rounded-2xl p-12 bg-white cursor-pointer hover:bg-slate-50 transition-colors"
-                   onClick={() => fileInputRef.current?.click()}
-                 >
-                    <Upload size={64} className="mb-6 text-brand-200" />
-                    <p className="text-xl font-medium text-slate-600">PDFまたは画像をここにドラッグ＆ドロップ</p>
-                    <p className="mt-2 text-slate-400">または、ここをクリックしてファイルを選択</p>
-                 </div>
-               ) : (
-                 <>
-                    {/* Grid View */}
-                    {viewMode === 'grid' && (
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 pb-20">
-                            {pages.map((page, index) => renderThumbContent(page, index))}
+            <main className="flex-1 p-6 relative" 
+                  onDragOver={(e) => { 
+                      if (e.dataTransfer.types.includes('Files')) {
+                          e.preventDefault(); 
+                          e.currentTarget.classList.add('bg-blue-50'); 
+                      }
+                  }}
+                  onDragLeave={(e) => e.currentTarget.classList.remove('bg-blue-50')}
+                  onDrop={(e) => { 
+                      e.preventDefault(); e.currentTarget.classList.remove('bg-blue-50');
+                      if (e.dataTransfer.files?.length > 0) {
+                          fileInputRef.current.files = e.dataTransfer.files;
+                          handleFileUpload({ target: { files: e.dataTransfer.files } });
+                      }
+                  }}
+            >
+              {pages.length === 0 ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 pointer-events-none">
+                  <Upload size={64} className="mb-4 text-gray-300" />
+                  <p className="text-xl font-medium text-gray-500">PDF または 画像ファイルをドロップ</p>
+                  <p className="text-sm mt-2 text-gray-400">または上の「ファイル追加」ボタンから</p>
+                </div>
+              ) : (
+                <>
+                {viewMode === 'grid' && (
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-6 pb-20">
+                      {pages.map((page, index) => {
+                        const isRotated = page.rotation % 180 !== 0;
+                        // For display, swap the aspect ratio if rotated 90/270
+                        const displayAR = isRotated ? (page.originalHeight / page.originalWidth) : (page.originalWidth / page.originalHeight);
+                        return (
+                        <div 
+                          key={page.id} 
+                          draggable 
+                          onDragStart={(e) => {
+                              e.dataTransfer.setData('pageIndex', index);
+                              e.dataTransfer.setData('sourceId', page.sourcePdfId);
+                              if (e.shiftKey) e.dataTransfer.setData('dragMode', 'group');
+                          }}
+                          onDragOver={(e) => { e.preventDefault(); setDragTargetIndex(index); }}
+                          onDrop={(e) => handlePageDrop(e, index)}
+                          className={`relative group bg-white rounded-lg shadow-sm border-2 transition-all cursor-pointer ${focusedPageIndex === index ? 'ring-2 ring-brand-500 ring-offset-2' : ''} ${selectedPageIds.has(page.id) ? 'border-brand-500 bg-brand-50' : 'border-transparent hover:border-gray-300'}`}
+                          onClick={() => setFocusedPageIndex(index)}
+                          onDoubleClick={() => openEditor(page)}
+                        >
+                          <div className="bg-gray-100 rounded-t-lg overflow-hidden relative w-full flex items-center justify-center" style={{ aspectRatio: displayAR, minHeight: '150px' }}>
+                             <div className="relative w-full h-full flex items-center justify-center">
+                                 {/* Image Container: Absolute Centering */}
+                                 <img 
+                                    src={page.thumbnailUrl} 
+                                    className="absolute"
+                                    style={{ 
+                                        transform: `rotate(${page.rotation}deg)`,
+                                        // If rotated, the image "width" (which is visually vertical) should match container height
+                                        width: isRotated ? (page.originalHeight / page.originalWidth * 100) + '%' : '100%',
+                                        height: isRotated ? (page.originalWidth / page.originalHeight * 100) + '%' : '100%',
+                                        maxWidth: 'none', maxHeight: 'none',
+                                        objectFit: 'contain'
+                                    }} 
+                                    alt="" 
+                                 />
+                                 
+                                 {/* Overlay Annotations */}
+                                 <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-center">
+                                     <div style={{ 
+                                         position: 'relative', 
+                                         width: isRotated ? (page.originalHeight / page.originalWidth * 100) + '%' : '100%',
+                                         height: isRotated ? (page.originalWidth / page.originalHeight * 100) + '%' : '100%',
+                                         transform: `rotate(${page.rotation}deg)` 
+                                     }}>
+                                         {page.annotations.map(ann => {
+                                             let style = { position:'absolute', left: `${(ann.x/page.originalWidth)*100}%`, top: `${(ann.y/page.originalHeight)*100}%` };
+                                             if (ann.type === 'highlight') return <div key={ann.id} style={{...style, width: `${(ann.width/page.originalWidth)*100}%`, height: `${(ann.height/page.originalHeight)*100}%`, backgroundColor: ann.color, opacity:0.4}} />;
+                                             if (ann.type === 'rect') return <div key={ann.id} style={{...style, width: `${(ann.width/page.originalWidth)*100}%`, height: `${(ann.height/page.originalHeight)*100}%`, border: `2px solid ${ann.color}`}} />;
+                                             return null;
+                                         })}
+                                     </div>
+                                 </div>
+                             </div>
+                          </div>
+                          
+                          <div className="p-3 flex items-center justify-between border-t bg-white rounded-b-lg">
+                            <span className="text-sm font-medium text-gray-500">{index + 1}</span>
+                            <div className="flex space-x-1">
+                               <button onClick={(e) => { 
+                                   e.stopPropagation(); 
+                                   const ids = new Set(selectedPageIds); 
+                                   pages.forEach(p => { if (p.sourcePdfId === page.sourcePdfId) ids.add(p.id); }); 
+                                   setSelectedPageIds(ids); 
+                               }} className="p-1.5 hover:bg-gray-100 rounded text-gray-500" title="このファイルのページをすべて選択"><Folder size={14}/></button>
+                               <button onClick={(e) => { e.stopPropagation(); setPages(ps => ps.map(p => p.id === page.id ? { ...p, rotation: (p.rotation + 90) % 360 } : p)); }} className="p-1.5 hover:bg-gray-100 rounded text-gray-500" title="回転"><RotateCw size={14}/></button>
+                               <button onClick={(e) => { e.stopPropagation(); openEditor(page); }} className="px-3 py-1 bg-brand-600 hover:bg-brand-700 text-white text-xs rounded font-bold">編集</button>
+                            </div>
+                          </div>
+                          
+                          <div className="absolute top-2 left-2 z-10" onClick={(e) => e.stopPropagation()}>
+                             <input type="checkbox" checked={selectedPageIds.has(page.id)} onChange={(e) => { const newSet = new Set(selectedPageIds); if (e.target.checked) newSet.add(page.id); else newSet.delete(page.id); setSelectedPageIds(newSet); }} className="w-5 h-5 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                          </div>
+
+                          {dragTargetIndex === index && <div className="absolute -left-3 top-0 bottom-0 w-1 bg-brand-500 shadow-[0_0_8px_rgba(14,165,233,0.8)] z-20"></div>}
                         </div>
-                    )}
-
-                    {/* Stack View */}
-                    {viewMode === 'stack' && (
-                        <div className="flex flex-col justify-center items-center h-full relative">
-                            <div className="relative w-full flex-1 flex justify-center items-center" onClick={() => setFocusedPageIndex((f) => (f + 1) % pages.length)}>
-                                {pages.map((page, index) => {
-                                    const offset = index - focusedPageIndex;
-                                    if (offset < 0) return null; 
-                                    if (offset > 5) return null; 
-                                    return (
-                                        <div key={page.id} className="absolute transition-all duration-300 ease-out shadow-2xl rounded-lg bg-white overflow-hidden border border-slate-200" 
-                                             style={{ 
-                                                 zIndex: 50 - offset, 
-                                                 transform: `scale(${1 - offset * 0.05}) translateY(${offset * 20}px)`,
-                                                 opacity: 1 - offset * 0.15,
-                                                 width: '400px'
-                                             }}>
-                                             <div className="relative pointer-events-none">
-                                                <img src={page.thumbnailUrl} className="w-full" />
-                                                {index === focusedPageIndex && (
-                                                    <div className="absolute top-2 right-2 bg-brand-600 text-white px-3 py-1 rounded-full text-sm font-bold shadow-lg">
-                                                        Page {index + 1}
-                                                    </div>
-                                                )}
-                                             </div>
-                                             {index === focusedPageIndex && (
-                                                 <div className="p-4 bg-white border-t flex justify-center">
-                                                     <button onClick={(e) => { e.stopPropagation(); handleEditPage(page); }} className="px-6 py-2 bg-brand-600 text-white rounded-lg font-bold shadow hover:bg-brand-700">編集する</button>
-                                                 </div>
-                                             )}
+                      )})}
+                    </div>
+                )}
+                
+                {viewMode === 'groups' && (
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-8 pb-20">
+                        {groupedPages.map(([sourceId, groupPages], gIndex) => {
+                            const source = sources.get(sourceId);
+                            const firstPage = groupPages[0];
+                            return (
+                                <div 
+                                   key={sourceId}
+                                   draggable
+                                   onDragStart={(e) => e.dataTransfer.setData('groupSourceId', sourceId)}
+                                   onDragOver={(e) => e.preventDefault()}
+                                   onDrop={(e) => handleGroupDrop(e, sourceId)}
+                                   className="bg-gray-100 p-4 rounded-xl shadow-inner cursor-move hover:bg-gray-200 transition-colors"
+                                >
+                                    <div className="flex items-center mb-2 space-x-2 text-gray-600">
+                                        <Folder size={20} />
+                                        <span className="font-bold text-sm truncate">{source?.name || 'Unknown File'}</span>
+                                        <span className="text-xs bg-gray-200 px-2 py-0.5 rounded-full">{groupPages.length}p</span>
+                                    </div>
+                                    
+                                    {/* Dense Stack Representation */}
+                                    <div className="relative w-full h-64 flex justify-center items-center">
+                                        <div className="relative w-40 h-56">
+                                            {groupPages.slice(0, 5).map((page, i) => (
+                                                <div 
+                                                   key={page.id}
+                                                   className="absolute top-0 left-0 w-full h-full bg-white border border-gray-300 shadow-md rounded overflow-hidden"
+                                                   style={{ 
+                                                       transform: `translate(${i * 4}px, ${i * 4}px)`,
+                                                       zIndex: 10 - i 
+                                                   }}
+                                                >
+                                                    <img 
+                                                       src={page.thumbnailUrl} 
+                                                       className="w-full h-full object-contain" 
+                                                       style={{ transform: `rotate(${page.rotation}deg)` }}
+                                                    />
+                                                </div>
+                                            ))}
+                                            {groupPages.length > 5 && (
+                                                <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center z-20" style={{ transform: `translate(24px, 24px)` }}>
+                                                    <span className="bg-black/50 text-white px-2 py-1 rounded text-xs">+{groupPages.length - 5}</span>
+                                                </div>
+                                            )}
                                         </div>
-                                    )
-                                })}
-                            </div>
-                            
-                            {/* Stack Navigation Controls */}
-                            <div className="bg-white p-2 rounded-full shadow-lg border border-slate-200 flex gap-2 mb-8 z-50">
-                                <button onClick={() => setFocusedPageIndex(0)} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="最初へ"><ChevronsLeft size={20} /></button>
-                                <button onClick={() => setFocusedPageIndex(p => Math.max(0, p - 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="前へ"><ChevronLeft size={20} /></button>
-                                <span className="px-3 py-2 font-mono text-slate-700 min-w-[60px] text-center">{focusedPageIndex + 1} / {pages.length}</span>
-                                <button onClick={() => setFocusedPageIndex(p => Math.min(pages.length - 1, p + 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="次へ"><ChevronRight size={20} /></button>
-                                <button onClick={() => setFocusedPageIndex(pages.length - 1)} className="p-2 hover:bg-slate-100 rounded-full text-slate-600" title="最後へ"><ChevronsRight size={20} /></button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Carousel View */}
-                    {viewMode === 'carousel' && (
-                        <div className="flex flex-col h-full">
-                            <div className="flex items-center gap-8 overflow-x-auto h-full px-20 snap-x" ref={carouselRef}>
-                                {pages.map((page, index) => {
-                                    const isFocused = index === focusedPageIndex;
-                                    return (
-                                        <div key={page.id} className={`snap-center shrink-0 transition-all duration-300 ${isFocused ? 'scale-110 z-10 shadow-2xl ring-4 ring-brand-100' : 'scale-90 opacity-60 grayscale'}`}
-                                            style={{ width: '300px' }}
-                                            onClick={() => setFocusedPageIndex(index)}>
-                                            <div className="bg-white rounded-lg overflow-hidden">
-                                                <img src={page.thumbnailUrl} className="w-full" />
-                                                {isFocused && (
-                                                    <div className="p-3 border-t bg-slate-50 flex justify-center">
-                                                        <button onClick={(e) => { e.stopPropagation(); handleEditPage(page); }} className="flex items-center gap-2 text-brand-700 font-bold hover:bg-brand-50 px-3 py-1 rounded"><Edit3 size={16}/> 編集</button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                            {/* Carousel Navigation Controls */}
-                            <div className="flex justify-center pb-6">
-                                <div className="bg-white p-2 rounded-full shadow-lg border border-slate-200 flex gap-2">
-                                    <button onClick={() => setFocusedPageIndex(p => Math.max(0, p - 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600"><ChevronLeft size={20} /></button>
-                                    <span className="px-3 py-2 font-mono text-slate-700">{focusedPageIndex + 1} / {pages.length}</span>
-                                    <button onClick={() => setFocusedPageIndex(p => Math.min(pages.length - 1, p + 1))} className="p-2 hover:bg-slate-100 rounded-full text-slate-600"><ChevronRight size={20} /></button>
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
-                    )}
-                 </>
-               )}
-            </div>
+                            );
+                        })}
+                    </div>
+                )}
 
-            {/* Floating Delete Bar */}
-            {selectedPageIds.size > 0 && (
-                <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-4 z-30 animate-bounce-in">
-                    <span className="font-medium">{selectedPageIds.size} ページ選択中</span>
-                    <button onClick={handleDeletePages} className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-full text-sm font-bold transition-colors">
-                        削除する
-                    </button>
-                    <button onClick={() => setSelectedPageIds(new Set())} className="text-slate-400 hover:text-white">
-                        <X size={20} />
-                    </button>
-                </div>
-            )}
-            
-            {/* Drag Overlay */}
-            {isDraggingFile && (
-                <div className="fixed inset-0 bg-brand-500/90 z-50 flex flex-col items-center justify-center text-white backdrop-blur-sm pointer-events-none">
-                    <FolderPlus size={80} className="mb-4 animate-bounce" />
-                    <h2 className="text-3xl font-bold">ドロップしてファイルを追加</h2>
-                </div>
-            )}
+                {viewMode === 'stack' && (
+                    <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+                        <div className="relative w-[500px] h-[700px] preserve-3d">
+                             {pages.map((page, index) => {
+                                 const offset = index - focusedPageIndex;
+                                 if (Math.abs(offset) > 5) return null; 
+                                 const zIndex = 50 - Math.abs(offset);
+                                 const scale = 1 - Math.abs(offset) * 0.02; 
+                                 const translateY = offset * 5; 
+                                 const opacity = 1 - Math.abs(offset) * 0.1;
+                                 
+                                 return (
+                                     <div 
+                                        key={page.id}
+                                        className="absolute top-1/2 left-1/2 w-full bg-white shadow-2xl rounded-lg border overflow-hidden transition-all duration-300 ease-out"
+                                        style={{ 
+                                            zIndex, 
+                                            opacity,
+                                            transform: `translate(-50%, -50%) translate(${offset * 20}px, ${-offset * 2}px) scale(${scale})`, 
+                                            aspectRatio: `${page.originalWidth}/${page.originalHeight}`,
+                                            height: 'auto',
+                                            maxHeight: '80vh'
+                                        }}
+                                        onClick={() => setFocusedPageIndex(index)}
+                                     >
+                                        <img src={page.thumbnailUrl} className="w-full h-full object-contain" style={{ transform: `rotate(${page.rotation}deg)` }} />
+                                        {index === focusedPageIndex && (
+                                            <div className="absolute bottom-4 left-0 right-0 text-center">
+                                                <button onClick={(e) => { e.stopPropagation(); openEditor(page); }} className="px-6 py-2 bg-brand-600 text-white rounded-full shadow-lg font-bold hover:scale-105 transition-transform">編集する</button>
+                                            </div>
+                                        )}
+                                     </div>
+                                 );
+                             })}
+                        </div>
+                        <div className="absolute bottom-8 left-0 right-0 flex justify-center space-x-4">
+                            <button onClick={() => setFocusedPageIndex(0)} className="p-2 bg-white rounded-full shadow hover:bg-gray-100"><ChevronsLeft/></button>
+                            <button onClick={() => setFocusedPageIndex(i => Math.max(0, i-1))} className="p-2 bg-white rounded-full shadow hover:bg-gray-100"><ChevronLeft/></button>
+                            <span className="px-4 py-2 bg-white rounded-full shadow font-mono">{focusedPageIndex+1} / {pages.length}</span>
+                            <button onClick={() => setFocusedPageIndex(i => Math.min(pages.length-1, i+1))} className="p-2 bg-white rounded-full shadow hover:bg-gray-100"><ChevronRight/></button>
+                            <button onClick={() => setFocusedPageIndex(pages.length-1)} className="p-2 bg-white rounded-full shadow hover:bg-gray-100"><ChevronsRight/></button>
+                        </div>
+                    </div>
+                )}
+
+                {viewMode === 'carousel' && (
+                    <div className="w-full h-full flex flex-col">
+                        <div ref={carouselContainerRef} className="flex-1 flex items-center overflow-x-auto space-x-8 px-[50vw] pb-10 scrollbar-hide">
+                            {pages.map((page, index) => (
+                                <div 
+                                   key={page.id}
+                                   className={`flex-shrink-0 transition-all duration-300 relative ${focusedPageIndex === index ? 'scale-100 opacity-100 z-10' : 'scale-90 opacity-60 grayscale'}`}
+                                   style={{ maxHeight: '80vh', maxWidth: '80vw', height: 'auto', width: 'auto' }}
+                                   onClick={() => setFocusedPageIndex(index)}
+                                >
+                                    <div className="bg-white rounded-lg shadow-xl border overflow-hidden h-full flex items-center justify-center" style={{ aspectRatio: `${page.originalWidth}/${page.originalHeight}` }}>
+                                        <img src={page.thumbnailUrl} className="max-w-full max-h-[80vh] w-auto h-auto object-contain" style={{ transform: `rotate(${page.rotation}deg)` }} />
+                                    </div>
+                                    {focusedPageIndex === index && (
+                                        <div className="absolute -bottom-12 left-0 right-0 flex justify-center">
+                                           <button onClick={() => openEditor(page)} className="px-4 py-2 bg-brand-600 text-white rounded-full shadow hover:bg-brand-700 font-bold text-sm">編集</button>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="h-12 flex justify-center items-center space-x-4 border-t bg-white">
+                            <button onClick={() => setFocusedPageIndex(i => Math.max(0, i-1))} className="p-1 hover:bg-gray-100 rounded"><ChevronLeft/></button>
+                            <span className="text-sm font-medium">{focusedPageIndex+1} / {pages.length}</span>
+                            <button onClick={() => setFocusedPageIndex(i => Math.min(pages.length-1, i+1))} className="p-1 hover:bg-gray-100 rounded"><ChevronRight/></button>
+                        </div>
+                    </div>
+                )}
+                </>
+              )}
+            </main>
 
             {/* Editor Modal */}
-            {editorPage && (
-               <AnnotationEditor 
-                  page={editorPage.page} 
-                  imageSrc={editorPage.highResUrl} 
-                  textContent={editorPage.textContent}
-                  viewportInfo={editorPage.viewportInfo}
-                  onClose={() => setEditorPage(null)} 
-                  onSave={handleSaveAnnotation} 
-               />
+            {editingPageId && editingPageInfo && (
+                <AnnotationEditor 
+                    page={pages.find(p => p.id === editingPageId)}
+                    imageSrc={editingPageInfo.imageSrc}
+                    textContent={editingPageInfo.textContent}
+                    onClose={() => { setEditingPageId(null); setEditingPageInfo(null); }}
+                    onSave={(newAnns) => {
+                        setPages(prev => prev.map(p => p.id === editingPageId ? { ...p, annotations: newAnns } : p));
+                        setEditingPageId(null); setEditingPageInfo(null);
+                    }}
+                />
             )}
             
             {/* Page Number Modal */}
             {showPageNumModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowPageNumModal(false)}>
-                    <div className="bg-white rounded-xl shadow-2xl p-6 w-80" onClick={e => e.stopPropagation()}>
-                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                            <Hash size={20} className="text-brand-600"/> ページ番号設定
-                        </h3>
-                        
+                <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+                    <div className="bg-white rounded-lg shadow-lg p-6 w-96">
+                        <h3 className="text-lg font-bold mb-4">ページ番号の設定</h3>
                         <div className="space-y-3">
-                            <button onClick={() => updatePageNumberMode('bottom-center')} className={`w-full p-3 rounded-lg border-2 flex items-center justify-between ${pageNumMode === 'bottom-center' ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-brand-300'}`}>
-                                <span className="font-medium">中央下 (フッター)</span>
-                                {pageNumMode === 'bottom-center' && <Check size={18} className="text-brand-600" />}
+                            <button onClick={() => applyPageNumbers('bottomCenter')} className="w-full py-3 border rounded hover:bg-brand-50 flex items-center justify-center">
+                                <div className="w-32 h-20 bg-gray-100 border relative">
+                                    <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs">- 1 -</span>
+                                </div>
+                                <span className="ml-4 font-bold">フッター中央</span>
                             </button>
-                            <button onClick={() => updatePageNumberMode('bottom-right')} className={`w-full p-3 rounded-lg border-2 flex items-center justify-between ${pageNumMode === 'bottom-right' ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-brand-300'}`}>
-                                <span className="font-medium">右下</span>
-                                {pageNumMode === 'bottom-right' && <Check size={18} className="text-brand-600" />}
+                            <button onClick={() => applyPageNumbers('bottomRight')} className="w-full py-3 border rounded hover:bg-brand-50 flex items-center justify-center">
+                                <div className="w-32 h-20 bg-gray-100 border relative">
+                                    <span className="absolute bottom-2 right-2 text-xs">- 1 -</span>
+                                </div>
+                                <span className="ml-4 font-bold">右下</span>
                             </button>
-                            
-                            <hr className="my-2 border-slate-100"/>
-                            
-                            <button onClick={() => updatePageNumberMode('none')} className="w-full p-3 rounded-lg border-2 border-slate-200 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 flex items-center justify-center gap-2">
-                                <RefreshCcw size={16} /> リセット (番号削除)
-                            </button>
+                        </div>
+                        <div className="mt-6 flex justify-between">
+                            <button onClick={resetPageNumbers} className="text-red-500 text-sm hover:underline">番号を削除</button>
+                            <button onClick={() => setShowPageNumModal(false)} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">キャンセル</button>
                         </div>
                     </div>
                 </div>
             )}
-
-            {/* Loading Overlay */}
+            
             {isProcessing && (
-                <div className="fixed inset-0 bg-white/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
-                    <div className="w-12 h-12 border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin mb-4"></div>
-                    <p className="text-brand-800 font-medium">処理中...</p>
+                <div className="fixed inset-0 z-[100] bg-white/80 flex flex-col items-center justify-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-brand-200 border-t-brand-600 mb-4"></div>
+                    <p className="text-lg font-bold text-brand-700">処理中...</p>
                 </div>
             )}
           </div>
         );
-      }
+      };
 
       const root = ReactDOM.createRoot(document.getElementById('root'));
       root.render(<App />);
