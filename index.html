@@ -518,6 +518,13 @@
                    ctx.font = `${fontWeight} ${ann.fontSize || 32}px ${ann.fontFamily || 'sans-serif'}`;
                    ctx.fillText(ann.text, ann.x, ann.y); 
                  }
+                 else if (ann.type === 'image' && ann.imageData) {
+                     await new Promise((resolve) => {
+                         const img = new Image();
+                         img.onload = () => { ctx.drawImage(img, boxX, boxY, boxW, boxH); resolve(null); };
+                         img.src = ann.imageData; 
+                     });
+                 }
              }
              canvas.toBlob(blob => { if (blob) { navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(() => alert("画像をクリップボードにコピーしました")); } }, 'image/png');
         };
@@ -618,9 +625,23 @@
                  return x >= boxX && x <= boxX + boxW && y >= boxY && y <= boxY + boxH;
              })?.id;
              if (clickedId) {
-                 if (e.shiftKey) { const newSet = new Set(selectedIds); if (newSet.has(clickedId)) newSet.delete(clickedId); else newSet.add(clickedId); setSelectedIds(newSet); }
-                 else { if (!selectedIds.has(clickedId)) setSelectedIds(new Set([clickedId])); setInteractionMode('moving'); setInteractionStartPos({ x, y }); const stateMap = new Map(); annotations.forEach(a => stateMap.set(a.id, {...a})); setInitialAnnStates(stateMap); }
-             } else { setSelectedIds(new Set()); setSelectionBox({ x, y, w: 0, h: 0 }); setInteractionMode('selecting'); }
+                 if (e.ctrlKey || e.metaKey) { 
+                     const newSet = new Set(selectedIds); 
+                     if (newSet.has(clickedId)) newSet.delete(clickedId); 
+                     else newSet.add(clickedId); 
+                     setSelectedIds(newSet); 
+                 } else { 
+                     if (!selectedIds.has(clickedId)) setSelectedIds(new Set([clickedId])); 
+                     // Don't deselect if clicking an existing selection (unless ctrl pressed), allows for moving multiple
+                 }
+                 setInteractionMode('moving'); 
+                 setInteractionStartPos({ x, y }); 
+                 const stateMap = new Map(); annotations.forEach(a => stateMap.set(a.id, {...a})); setInitialAnnStates(stateMap); 
+             } else { 
+                 setSelectedIds(new Set()); 
+                 setSelectionBox({ x, y, w: 0, h: 0 }); 
+                 setInteractionMode('selecting'); 
+             }
              setContextMenu(null);
              return;
           }
@@ -662,8 +683,24 @@
                        const scaleFactor = 1 + (dy / (initial.height || 100)); 
                        const newSize = Math.max(10, Math.floor(initial.fontSize * scaleFactor));
                        let newW = initial.width || 0; let newH = initial.height || 0;
-                       if (ann.type !== 'text') { if (resizeHandle.includes('e')) newW += dx; if (resizeHandle.includes('w')) newW -= dx; if (resizeHandle.includes('s')) newH += dy; if (resizeHandle.includes('n')) newH -= dy; }
-                       return { ...ann, fontSize: newSize, width: newW, height: newH };
+                       
+                       // Recalculate Width/Height based on drag handles
+                       if (ann.type !== 'text') { 
+                           if (resizeHandle.includes('e')) newW += dx; 
+                           if (resizeHandle.includes('w')) newW -= dx; 
+                           if (resizeHandle.includes('s')) newH += dy; 
+                           if (resizeHandle.includes('n')) newH -= dy; 
+                       }
+                       
+                       // Update tail tip proportionally for callouts
+                       let newTail = ann.tailTip;
+                       if (initial.tailTip && initial.width && initial.height) {
+                           const ratioX = newW / initial.width;
+                           const ratioY = newH / initial.height;
+                           newTail = { x: initial.tailTip.x * ratioX, y: initial.tailTip.y * ratioY };
+                       }
+                       
+                       return { ...ann, fontSize: newSize, width: newW, height: newH, tailTip: newTail };
                   }
                   let newX = initial.x; let newY = initial.y; let newW = initial.width || 0; let newH = initial.height || 0;
                   if (resizeHandle.includes('e')) newW += dx; if (resizeHandle.includes('w')) { newX += dx; newW -= dx; } if (resizeHandle.includes('s')) newH += dy; if (resizeHandle.includes('n')) { newY += dy; newH -= dy; }
@@ -697,7 +734,17 @@
              const newAnn = { id: generateId(), type: currentAnnotation.type, x: dragStartPos.x, y: dragStartPos.y, width: currentAnnotation.width, height: currentAnnotation.height, color: currentAnnotation.color };
              saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id]));
              setTool('select'); // Immediately switch to select mode
-          } setCurrentAnnotation(null);
+          } else if (currentAnnotation) {
+             // Handle click-to-add for small drags (defaults)
+             const defW = 100; const defH = 100;
+             const newAnn = { id: generateId(), type: currentAnnotation.type, x: dragStartPos.x, y: dragStartPos.y, width: defW, height: defH, color: currentAnnotation.color };
+             // For Arrow, different defaults?
+             if (currentAnnotation.type === 'arrow') { newAnn.width = 100; newAnn.height = 0; }
+             
+             saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id]));
+             setTool('select');
+          }
+          setCurrentAnnotation(null);
         };
         const handleResizeStart = (e, handle, id) => { e.stopPropagation(); e.preventDefault(); setSelectedIds(new Set([id])); setInteractionMode('resizing'); setResizeHandle(handle); setInteractionStartPos(getPointerPos(e)); const stateMap = new Map(); stateMap.set(id, {...annotations.find(a => a.id === id)}); setInitialAnnStates(stateMap); };
         const handleTailDragStart = (e, id) => { e.stopPropagation(); e.preventDefault(); setSelectedIds(new Set([id])); setInteractionMode('tail'); setInteractionStartPos(getPointerPos(e)); const stateMap = new Map(); stateMap.set(id, {...annotations.find(a => a.id === id)}); setInitialAnnStates(stateMap); };
@@ -814,7 +861,7 @@
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} 
                    >
-                       <img ref={imgRef} src={imageSrc} className="w-full h-full pointer-events-none select-none" alt="" />
+                       <img ref={imgRef} src={imageSrc} className="w-full h-full pointer-events-none select-none" alt="" draggable="false" onDragStart={(e) => e.preventDefault()} />
                        <div className="textLayer" style={{ pointerEvents: tool === 'select' ? 'auto' : 'none' }}>
                            {textContent?.items?.map((item, i) => (
                              <span key={i} style={{ left: `${item.transform[4]}px`, top: `${page.originalHeight - item.transform[5] - item.height}px`, fontSize: `${item.height}px`, fontFamily: item.fontName, width: `${item.width}px`, height: `${item.height}px` }}>{item.str}</span>
@@ -889,7 +936,9 @@
         useEffect(() => {
            if (carouselRef.current && viewMode === 'carousel') {
                const item = carouselRef.current.children[focusedPageIndex];
-               if (item) item.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+               if (item) {
+                   item.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+               }
            }
         }, [focusedPageIndex, viewMode]);
 
@@ -990,33 +1039,17 @@
            const draggedSourceId = e.dataTransfer.getData('source-group');
 
            if (draggedSourceId && viewMode === 'folder') {
-                // Group reorder logic (swap entire file groups)
                 const sourceIndex = groupedPages.findIndex(g => g.sourcePdfId === draggedSourceId);
                 const targetGroupIndex = targetIndex; 
                 if (sourceIndex === -1 || targetGroupIndex === -1 || sourceIndex === targetGroupIndex) return;
-                
                 const newGroups = [...groupedPages];
                 const [movedGroup] = newGroups.splice(sourceIndex, 1);
                 newGroups.splice(targetGroupIndex, 0, movedGroup);
-                
                 const flattenedPages = newGroups.flatMap(g => g.pages);
                 pushPageHistory(flattenedPages);
            } else if (draggedPageId) {
-                // Single page or Shift-Group page reorder
                 const sourceIndex = pages.findIndex(p => p.id === draggedPageId);
                 if (sourceIndex === -1) return;
-                
-                // If Shift held (Group Move)
-                if (e.shiftKey) {
-                    const sourcePage = pages[sourceIndex];
-                    const groupPages = pages.filter(p => p.sourcePdfId === sourcePage.sourcePdfId);
-                    const otherPages = pages.filter(p => p.sourcePdfId !== sourcePage.sourcePdfId);
-                    
-                    // Logic to insert group at target index is complex because target index shifts. 
-                    // Simplified: Move page logic
-                    // Fallback to simple move for now to ensure stability
-                }
-
                 const newPages = [...pages];
                 const [movedPage] = newPages.splice(sourceIndex, 1);
                 newPages.splice(targetIndex, 0, movedPage);
@@ -1047,10 +1080,8 @@
                  const fontSize = 16;
                  const margin = 20;
                  let x = 0, y = 0;
-                 // Assuming A4 ratio roughly, position at bottom
                  if (position === 'bottom-center') { x = page.originalWidth / 2 - 10; y = page.originalHeight - margin - fontSize; }
                  else { x = page.originalWidth - margin - 30; y = page.originalHeight - margin - fontSize; }
-                 
                  const numAnn = { id: generateId(), type: 'text', text, x, y, color: '#000000', fontSize, fontFamily: 'sans-serif', isPageNumber: true };
                  return { ...page, annotations: [...existingAnns, numAnn] };
             });
@@ -1060,6 +1091,17 @@
         const resetPageNumbers = () => {
              pushPageHistory(pages.map(p => ({ ...p, annotations: (p.annotations||[]).filter(a => !a.isPageNumber) })));
              setIsPageNumberModalOpen(false);
+        };
+
+        // Helper to render annotations on thumbnails
+        const renderThumbnailAnnotation = (ann, page) => {
+            const style = { position: 'absolute', left: `${(ann.x/page.originalWidth)*100}%`, top: `${(ann.y/page.originalHeight)*100}%` };
+            if(ann.type==='text') return <div key={ann.id} style={{...style, fontSize:`${ann.fontSize/3}px`, color:ann.color, whiteSpace:'nowrap', transform:'scale(0.3)', transformOrigin:'top left'}}>{ann.text}</div>;
+            if(ann.type==='rect') return <div key={ann.id} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, border:`2px solid ${ann.color}`}} />;
+            if(ann.type==='circle') return <div key={ann.id} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, border:`2px solid ${ann.color}`, borderRadius:'50%'}} />;
+            if(ann.type==='filledRect') return <div key={ann.id} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, background:ann.color}} />;
+            if(ann.type==='image' && ann.imageData) return <img key={ann.id} src={ann.imageData} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, objectFit:'contain'}} />;
+            return null;
         };
 
         if (editorPageId && editorData) {
@@ -1140,7 +1182,6 @@
                                   </div>
                                   
                                   <div className="p-4 flex items-center justify-center bg-gray-50 rounded-t-lg aspect-[3/4] overflow-hidden relative">
-                                      {/* Thumbnail Container: Swap width/height logic based on rotation for visual correctness */}
                                       <div style={{ 
                                           width: (page.rotation % 180 === 0) ? '100%' : 'auto', 
                                           height: (page.rotation % 180 === 0) ? 'auto' : '100%',
@@ -1149,15 +1190,8 @@
                                       }}>
                                           <div className="w-full h-full relative" style={{ transform: `rotate(${page.rotation}deg)` }}>
                                                <img src={page.thumbnailUrl} className="w-full h-full object-contain pointer-events-none" />
-                                               {/* Miniature Annotations */}
                                                <div className="absolute inset-0 pointer-events-none">
-                                                  {page.annotations?.map(ann => {
-                                                      // Simplified rendering for thumbnails
-                                                      const style = { position: 'absolute', left: `${(ann.x/page.originalWidth)*100}%`, top: `${(ann.y/page.originalHeight)*100}%` };
-                                                      if(ann.type==='text') return <div key={ann.id} style={{...style, fontSize:`${ann.fontSize/3}px`, color:ann.color}}>{ann.text}</div>;
-                                                      if(ann.type==='rect') return <div key={ann.id} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, border:`2px solid ${ann.color}`}} />;
-                                                      return null;
-                                                  })}
+                                                  {page.annotations?.map(ann => renderThumbnailAnnotation(ann, page))}
                                                </div>
                                           </div>
                                       </div>
@@ -1195,7 +1229,6 @@
                                            <span className="font-bold text-sm truncate flex-1">{source?.name || 'Unknown File'}</span>
                                            <span className="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-500">{group.pages.length} pages</span>
                                        </div>
-                                       {/* Stack Preview */}
                                        <div className="relative h-48 w-full flex justify-center items-center">
                                            {group.pages.slice(0, 5).map((p, i) => (
                                                <div key={p.id} className="absolute shadow-md border bg-white" style={{ 
@@ -1205,6 +1238,9 @@
                                                    transform: `rotate(${p.rotation}deg)` 
                                                 }}>
                                                    <img src={p.thumbnailUrl} className="w-full h-full object-contain" />
+                                                   <div className="absolute inset-0 pointer-events-none scale-[0.3] origin-top-left">
+                                                       {p.annotations?.map(ann => renderThumbnailAnnotation(ann, p))}
+                                                   </div>
                                                </div>
                                            ))}
                                        </div>
@@ -1219,7 +1255,7 @@
                             {pages.map((page, index) => {
                                 const offset = index - focusedPageIndex;
                                 const isActive = index === focusedPageIndex;
-                                if (Math.abs(offset) > 5) return null; // Don't render far away cards
+                                if (Math.abs(offset) > 5) return null; 
                                 return (
                                    <div 
                                      key={page.id}
@@ -1235,6 +1271,9 @@
                                        <div className="w-full h-full p-4 flex flex-col">
                                            <div className="flex-1 overflow-hidden relative flex items-center justify-center">
                                                <img src={page.thumbnailUrl} className="max-w-full max-h-full object-contain" style={{ transform: `rotate(${page.rotation}deg)` }} />
+                                               <div className="absolute inset-0 pointer-events-none">
+                                                  {page.annotations?.map(ann => renderThumbnailAnnotation(ann, page))}
+                                               </div>
                                            </div>
                                            {isActive && (
                                                <div className="h-12 border-t mt-2 flex items-center justify-center">
@@ -1245,7 +1284,6 @@
                                    </div>
                                 );
                             })}
-                             {/* Stack Controls */}
                             <div className="absolute bottom-4 flex items-center space-x-4 bg-white/80 backdrop-blur p-2 rounded-full shadow-lg z-[110]">
                                 <button onClick={() => setFocusedPageIndex(0)} className="p-2 hover:bg-gray-200 rounded-full"><ChevronsLeft size={20}/></button>
                                 <button onClick={() => setFocusedPageIndex(Math.max(0, focusedPageIndex-1))} className="p-2 hover:bg-gray-200 rounded-full"><ChevronLeft size={20}/></button>
@@ -1265,7 +1303,12 @@
                                   style={{ height: '80%', width: 'auto', aspectRatio: `${page.originalWidth}/${page.originalHeight}`, maxHeight: '80vh', maxWidth: '80vw' }}
                                   onClick={() => setFocusedPageIndex(index)}
                                 >
-                                    <img src={page.thumbnailUrl} className="w-full h-full object-contain" style={{ transform: `rotate(${page.rotation}deg)` }} />
+                                    <div className="w-full h-full relative">
+                                        <img src={page.thumbnailUrl} className="w-full h-full object-contain" style={{ transform: `rotate(${page.rotation}deg)` }} />
+                                        <div className="absolute inset-0 pointer-events-none">
+                                            {page.annotations?.map(ann => renderThumbnailAnnotation(ann, page))}
+                                        </div>
+                                    </div>
                                     {focusedPageIndex === index && (
                                         <button onClick={() => openEditor(page.id)} className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-brand-600 text-white px-4 py-2 rounded-full shadow-lg hover:bg-brand-700 flex items-center"><Edit3 size={16} className="mr-2"/> 編集</button>
                                     )}
@@ -1279,7 +1322,6 @@
 
              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="application/pdf,image/*" multiple className="hidden" />
              
-             {/* Page Number Modal */}
              {isPageNumberModalOpen && (
                  <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center">
                      <div className="bg-white rounded-lg p-6 w-96 shadow-xl animate-bounce-in">
