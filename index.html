@@ -132,7 +132,6 @@
         Type: createIcon(<><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></>),
         Move: createIcon(<><polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 15 22 12 19 9"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line></>),
         Check: createIcon(<polyline points="20 6 9 17 4 12"></polyline>),
-        Highlighter: createIcon(<><path d="m9 11-6 6v3h9l2-2"></path><path d="m22 7-8.1 8.1"></path><path d="M16 3 2.6 16.4"></path></>),
         ImageIcon: createIcon(<><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></>),
         ZoomIn: createIcon(<><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></>),
         ZoomOut: createIcon(<><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></>),
@@ -169,7 +168,7 @@
       };
     
       const { 
-        X, Square, FilledSquare, Circle, ArrowRight, Type, Move, Check, Highlighter, 
+        X, Square, FilledSquare, Circle, ArrowRight, Type, Move, Check, 
         ImageIcon, ZoomIn, ZoomOut, Bold, 
         Upload, FileDown, Trash2, RotateCw, Edit3, Copy, Plus, 
         ChevronDown, ArrowUpDown, ArrowLeftRight, RefreshCcw, Shapes,
@@ -274,7 +273,6 @@
           }
         }
 
-        // Add cMapUrl for Japanese font support
         const loadingTask = pdfjsLib.getDocument({
            data: arrayBuffer.slice(0),
            cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
@@ -337,12 +335,7 @@
                      if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
                  }
 
-                 if (ann.type === 'highlight') {
-                     ctx.fillStyle = ann.color;
-                     ctx.globalAlpha = 0.4;
-                     ctx.fillRect(boxX, boxY, boxW, boxH);
-                     ctx.globalAlpha = 1.0; 
-                 } else if (ann.type === 'rect') {
+                 if (ann.type === 'rect') {
                    ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.strokeRect(boxX, boxY, boxW, boxH);
                  } else if (ann.type === 'filledRect') {
                    ctx.fillStyle = ann.color; ctx.fillRect(boxX, boxY, boxW, boxH);
@@ -406,7 +399,6 @@
       };
 
       const renderHighResPage = async (pageData, source) => {
-          // Add cMapUrl here as well
           const loadingTask = pdfjsLib.getDocument({ 
               data: source.data.slice(0),
               cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
@@ -447,7 +439,6 @@
         const [interactionStartPos, setInteractionStartPos] = useState({ x: 0, y: 0 });
         const [initialAnnStates, setInitialAnnStates] = useState(new Map());
         const [selectionBox, setSelectionBox] = useState(null);
-        const [textSelection, setTextSelection] = useState(null); 
         const [contextMenu, setContextMenu] = useState(null);
 
         const imgRef = useRef(null);
@@ -510,8 +501,8 @@
                  ctx.globalAlpha = 1.0; 
                  let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
                  if (ann.type !== 'arrow') { if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); } }
-                 if (ann.type === 'highlight') { ctx.fillStyle = ann.color; ctx.globalAlpha = 0.4; ctx.fillRect(boxX, boxY, boxW, boxH); ctx.globalAlpha = 1.0; }
-                 else if (ann.type === 'rect') { ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.strokeRect(boxX, boxY, boxW, boxH); }
+                 
+                 if (ann.type === 'rect') { ctx.strokeStyle = ann.color; ctx.lineWidth = 4; ctx.strokeRect(boxX, boxY, boxW, boxH); }
                  else if (ann.type === 'text' && ann.text) {
                    ctx.fillStyle = ann.color;
                    const fontWeight = ann.fontWeight === 'bold' ? 'bold' : 'normal';
@@ -537,36 +528,6 @@
              onClose();
         };
 
-        const handleTextSelection = () => {
-            if (!imgRef.current) return;
-            const selection = window.getSelection();
-            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) { setTextSelection(null); return; }
-            const range = selection.getRangeAt(0); const rects = range.getClientRects();
-            const containerRect = imgRef.current.getBoundingClientRect();
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            let hasOverlap = false;
-            for (let i = 0; i < rects.length; i++) {
-                const rect = rects[i];
-                if (rect.right > containerRect.left && rect.left < containerRect.right && rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
-                        minX = Math.min(minX, rect.left - containerRect.left);
-                        minY = Math.min(minY, rect.top - containerRect.top);
-                        maxX = Math.max(maxX, rect.right - containerRect.left);
-                        maxY = Math.max(maxY, rect.bottom - containerRect.left);
-                        hasOverlap = true;
-                }
-            }
-            if (hasOverlap) {
-                const scaleX = page.originalWidth / containerRect.width;
-                const scaleY = page.originalHeight / containerRect.height;
-                setTextSelection({ x: minX * scaleX, y: minY * scaleY, width: (maxX - minX) * scaleX, height: (maxY - minY) * scaleY });
-            } else setTextSelection(null);
-        };
-        const applyTextHighlight = () => {
-            if (!textSelection) return;
-            saveToHistory([...annotations, { id: generateId(), type: 'highlight', x: textSelection.x, y: textSelection.y, width: textSelection.width, height: textSelection.height, color: '#ffff00' }]);
-            setTextSelection(null); window.getSelection().removeAllRanges();
-        };
-        useEffect(() => { document.addEventListener('selectionchange', handleTextSelection); return () => document.removeEventListener('selectionchange', handleTextSelection); }, []);
         useEffect(() => {
           if (selectedIds.size === 1) {
               const ann = annotations.find(a => a.id === Array.from(selectedIds)[0]);
@@ -576,6 +537,7 @@
               }
           }
         }, [selectedIds]);
+
         useEffect(() => {
             const handleKeyDown = (e) => {
                 if (selectedIds.size === 0) return;
@@ -600,81 +562,85 @@
         };
         const selectTool = (t) => {
            setSelectedIds(new Set()); setTool(t);
-           const defaults = { rect: '#ef4444', filledRect: '#000000', circle: '#ef4444', cross: '#ef4444', arrow: '#ef4444', text: '#000000', callout: '#000000', calloutCircle: '#000000', highlight: '#ffff00' };
+           const defaults = { rect: '#ef4444', filledRect: '#000000', circle: '#ef4444', cross: '#ef4444', arrow: '#ef4444', text: '#000000', callout: '#000000', calloutCircle: '#000000' };
            if (defaults[t]) setColor(defaults[t]);
         };
+
+        // --- NEW MOUSE HANDLERS (Simpler, Robust) ---
         const handleMouseDown = (e) => {
-          if (e.button === 2) return; // Right click handled by context menu
+          if (e.button === 2) return; 
           if (e.target.closest('button') || e.target.closest('.cursor-nw-resize') || e.target.closest('.cursor-crosshair') || e.target.closest('.context-menu')) return; 
-          
-          if (tool !== 'select') {
-              e.preventDefault(); // Stop text selection when drawing
-          }
           
           const { x, y } = getPointerPos(e); 
           setDragStartPos({ x, y });
+
           if (tool === 'select') {
+             // 1. Check intersection with annotations (reverse order to hit top-most first)
              const clickedId = [...annotations].reverse().find(ann => {
                  let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
                  if (ann.type === 'arrow') {
                      const minX = Math.min(ann.x, ann.x + ann.width); const minY = Math.min(ann.y, ann.y + ann.height);
                      const maxX = Math.max(ann.x, ann.x + ann.width); const maxY = Math.max(ann.y, ann.y + ann.height);
-                     boxX = minX - 5; boxY = minY - 5; boxW = maxX - minX + 10; boxH = maxY - minY + 10;
+                     boxX = minX - 10; boxY = minY - 10; boxW = maxX - minX + 20; boxH = maxY - minY + 20;
                  } else { if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); } }
                  if (ann.type === 'text') { const approxW = (ann.text.length * ann.fontSize) || 100; const approxH = ann.fontSize || 32; return x >= boxX && x <= boxX + approxW && y >= boxY && y <= boxY + approxH; }
                  return x >= boxX && x <= boxX + boxW && y >= boxY && y <= boxY + boxH;
              })?.id;
+
              if (clickedId) {
                  if (e.ctrlKey || e.metaKey) { 
                      const newSet = new Set(selectedIds); 
-                     if (newSet.has(clickedId)) newSet.delete(clickedId); 
-                     else newSet.add(clickedId); 
-                     setSelectedIds(newSet); 
+                     if (newSet.has(clickedId)) newSet.delete(clickedId); else newSet.add(clickedId); 
+                     setSelectedIds(newSet);
                  } else { 
-                     if (!selectedIds.has(clickedId)) setSelectedIds(new Set([clickedId])); 
-                     // Don't deselect if clicking an existing selection (unless ctrl pressed), allows for moving multiple
+                     // IMPORTANT: If clicking an item that is ALREADY selected, do NOT clear other selections (allows moving group)
+                     if (!selectedIds.has(clickedId)) {
+                        setSelectedIds(new Set([clickedId])); 
+                     }
                  }
                  setInteractionMode('moving'); 
                  setInteractionStartPos({ x, y }); 
                  const stateMap = new Map(); annotations.forEach(a => stateMap.set(a.id, {...a})); setInitialAnnStates(stateMap); 
              } else { 
-                 setSelectedIds(new Set()); 
+                 // Clicked on empty space -> Start Box Selection
+                 if (!e.ctrlKey && !e.metaKey) setSelectedIds(new Set()); 
                  setSelectionBox({ x, y, w: 0, h: 0 }); 
                  setInteractionMode('selecting'); 
              }
              setContextMenu(null);
-             return;
-          }
-          setIsDrawing(true);
-          if (['text','callout','calloutCircle'].includes(tool)) {
-             const text = prompt("テキストを入力してください:", "");
-             if (text && text.trim() !== "") {
-               const newAnn = { id: generateId(), type: tool, x, y, width: tool !== 'text' ? 200 : undefined, height: tool !== 'text' ? 100 : undefined, text, color, fontSize, fontWeight: isBold ? 'bold' : 'normal', fontFamily: fontFamily, tailTip: tool !== 'text' ? { x: 100, y: 150 } : undefined };
-               saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id]));
-               setTool('select'); // Immediately switch to select mode
-             }
-             setIsDrawing(false);
-          } else if (tool === 'image') { fileInputRef.current?.click(); setIsDrawing(false); }
-          else { setCurrentAnnotation({ type: tool, x, y, width: 0, height: 0, color }); }
-        };
+          } else {
+             // Drawing Tools
+             // PREVENT DEFAULT TO STOP NATIVE DRAGGING
+             e.preventDefault();
 
-        const handleContextMenu = (e, annId) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (annId) {
-                if (!selectedIds.has(annId)) setSelectedIds(new Set([annId]));
-                setContextMenu({ x: e.clientX, y: e.clientY, annotationId: annId });
-            }
+             setIsDrawing(true);
+             
+             // Immediate interactions for Text/Callout/Image
+             if (['text','callout','calloutCircle'].includes(tool)) {
+                 const text = prompt("テキストを入力してください:", "");
+                 if (text && text.trim() !== "") {
+                   const newAnn = { id: generateId(), type: tool, x, y, width: tool !== 'text' ? 200 : undefined, height: tool !== 'text' ? 100 : undefined, text, color, fontSize, fontWeight: isBold ? 'bold' : 'normal', fontFamily: fontFamily, tailTip: tool !== 'text' ? { x: 100, y: 150 } : undefined };
+                   saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id]));
+                   setTool('select'); 
+                 }
+                 setIsDrawing(false);
+             } else if (tool === 'image') {
+                 fileInputRef.current?.click(); 
+                 setIsDrawing(false);
+             } else {
+                 // Initialize shape for dragging
+                 setCurrentAnnotation({ type: tool, x, y, width: 0, height: 0, color });
+             }
+          }
         };
 
         const handleMouseMove = (e) => {
           const { x, y } = getPointerPos(e);
+          
           if (interactionMode === 'moving' && selectedIds.size > 0) {
               const dx = x - interactionStartPos.x; const dy = y - interactionStartPos.y;
               setAnnotations(prev => prev.map(ann => selectedIds.has(ann.id) && initialAnnStates.get(ann.id) ? { ...ann, x: initialAnnStates.get(ann.id).x + dx, y: initialAnnStates.get(ann.id).y + dy } : ann));
-              return;
-          }
-          if (interactionMode === 'resizing' && selectedIds.size === 1) {
+          } else if (interactionMode === 'resizing' && selectedIds.size === 1) {
               const id = Array.from(selectedIds)[0]; const initial = initialAnnStates.get(id); if (!initial) return;
               const dx = x - interactionStartPos.x; const dy = y - interactionStartPos.y;
               setAnnotations(prev => prev.map(ann => {
@@ -683,71 +649,87 @@
                        const scaleFactor = 1 + (dy / (initial.height || 100)); 
                        const newSize = Math.max(10, Math.floor(initial.fontSize * scaleFactor));
                        let newW = initial.width || 0; let newH = initial.height || 0;
-                       
-                       // Recalculate Width/Height based on drag handles
                        if (ann.type !== 'text') { 
-                           if (resizeHandle.includes('e')) newW += dx; 
-                           if (resizeHandle.includes('w')) newW -= dx; 
-                           if (resizeHandle.includes('s')) newH += dy; 
-                           if (resizeHandle.includes('n')) newH -= dy; 
+                           if (resizeHandle.includes('e')) newW += dx; if (resizeHandle.includes('w')) newW -= dx; if (resizeHandle.includes('s')) newH += dy; if (resizeHandle.includes('n')) newH -= dy; 
                        }
-                       
-                       // Update tail tip proportionally for callouts
                        let newTail = ann.tailTip;
                        if (initial.tailTip && initial.width && initial.height) {
-                           const ratioX = newW / initial.width;
-                           const ratioY = newH / initial.height;
+                           const ratioX = newW / initial.width; const ratioY = newH / initial.height;
                            newTail = { x: initial.tailTip.x * ratioX, y: initial.tailTip.y * ratioY };
                        }
-                       
                        return { ...ann, fontSize: newSize, width: newW, height: newH, tailTip: newTail };
                   }
                   let newX = initial.x; let newY = initial.y; let newW = initial.width || 0; let newH = initial.height || 0;
                   if (resizeHandle.includes('e')) newW += dx; if (resizeHandle.includes('w')) { newX += dx; newW -= dx; } if (resizeHandle.includes('s')) newH += dy; if (resizeHandle.includes('n')) { newY += dy; newH -= dy; }
                   return { ...ann, x: newX, y: newY, width: newW, height: newH };
-              })); return;
-          }
-          if (interactionMode === 'tail' && selectedIds.size === 1) {
+              }));
+          } else if (interactionMode === 'tail' && selectedIds.size === 1) {
              const id = Array.from(selectedIds)[0]; const initial = initialAnnStates.get(id); if (!initial) return;
              const dx = x - interactionStartPos.x; const dy = y - interactionStartPos.y;
              setAnnotations(prev => prev.map(ann => ann.id !== id ? ann : { ...ann, tailTip: { x: (initial.tailTip || {x: initial.width/2, y: initial.height+50}).x + dx, y: (initial.tailTip || {x: initial.width/2, y: initial.height+50}).y + dy } }));
-             return;
+          } else if (interactionMode === 'selecting') {
+             setSelectionBox({ x: Math.min(dragStartPos.x, x), y: Math.min(dragStartPos.y, y), w: Math.abs(x - dragStartPos.x), h: Math.abs(y - dragStartPos.y) });
+          } else if (isDrawing && currentAnnotation) {
+             setCurrentAnnotation(prev => ({ ...prev, width: x - dragStartPos.x, height: y - dragStartPos.y }));
           }
-          if (interactionMode === 'selecting') { setSelectionBox({ x: Math.min(dragStartPos.x, x), y: Math.min(dragStartPos.y, y), w: Math.abs(x - dragStartPos.x), h: Math.abs(y - dragStartPos.y) }); return; }
-          if (!isDrawing || !currentAnnotation) return;
-          setCurrentAnnotation(prev => ({ ...prev, width: x - dragStartPos.x, height: y - dragStartPos.y }));
         };
+
         const handleMouseUp = () => {
           if (['moving','resizing','tail'].includes(interactionMode)) saveToHistory(annotations);
+          
           if (interactionMode === 'selecting' && selectionBox) {
-              const { x, y, w, h } = selectionBox; const newSelection = new Set();
+              const { x, y, w, h } = selectionBox; const newSelection = new Set(selectedIds);
               annotations.forEach(ann => {
                  let boxX = ann.x; let boxY = ann.y; let boxW = ann.width || 0; let boxH = ann.height || 0;
                  if (ann.type === 'text') { boxW = 100; boxH = 32; } 
                  if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
-                 if (x < boxX + boxW && x + w > boxX && y < boxY + boxH && y + h > boxY) newSelection.add(ann.id);
-              }); setSelectedIds(newSelection); setSelectionBox(null);
+                 // Check intersection
+                 if (x < boxX + boxW && x + w > boxX && y < boxY + boxH && y + h > boxY) {
+                     newSelection.add(ann.id);
+                 }
+              }); 
+              setSelectedIds(newSelection); 
+              setSelectionBox(null);
           }
-          setInteractionMode('none'); setResizeHandle(null); setInitialAnnStates(new Map());
-          if (!isDrawing) return; setIsDrawing(false);
-          if (currentAnnotation && (Math.abs(currentAnnotation.width) > 5 || Math.abs(currentAnnotation.height) > 5)) {
-             const newAnn = { id: generateId(), type: currentAnnotation.type, x: dragStartPos.x, y: dragStartPos.y, width: currentAnnotation.width, height: currentAnnotation.height, color: currentAnnotation.color };
-             saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id]));
-             setTool('select'); // Immediately switch to select mode
-          } else if (currentAnnotation) {
-             // Handle click-to-add for small drags (defaults)
-             const defW = 100; const defH = 100;
-             const newAnn = { id: generateId(), type: currentAnnotation.type, x: dragStartPos.x, y: dragStartPos.y, width: defW, height: defH, color: currentAnnotation.color };
-             // For Arrow, different defaults?
-             if (currentAnnotation.type === 'arrow') { newAnn.width = 100; newAnn.height = 0; }
-             
-             saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id]));
-             setTool('select');
+
+          if (isDrawing && currentAnnotation) {
+              // Finalize Shape
+              const newAnn = { 
+                  id: generateId(), type: currentAnnotation.type, x: dragStartPos.x, y: dragStartPos.y, 
+                  width: currentAnnotation.width || 100, height: currentAnnotation.height || 100, 
+                  color: currentAnnotation.color 
+              };
+              // Special default for Arrow
+              if (currentAnnotation.type === 'arrow' && currentAnnotation.width === 0 && currentAnnotation.height === 0) {
+                   newAnn.width = 100; newAnn.height = 0;
+              }
+              saveToHistory([...annotations, newAnn]); 
+              setSelectedIds(new Set([newAnn.id]));
+              setTool('select'); 
           }
-          setCurrentAnnotation(null);
+
+          setInteractionMode('none'); setResizeHandle(null); setInitialAnnStates(new Map()); setIsDrawing(false); setCurrentAnnotation(null);
         };
+
         const handleResizeStart = (e, handle, id) => { e.stopPropagation(); e.preventDefault(); setSelectedIds(new Set([id])); setInteractionMode('resizing'); setResizeHandle(handle); setInteractionStartPos(getPointerPos(e)); const stateMap = new Map(); stateMap.set(id, {...annotations.find(a => a.id === id)}); setInitialAnnStates(stateMap); };
         const handleTailDragStart = (e, id) => { e.stopPropagation(); e.preventDefault(); setSelectedIds(new Set([id])); setInteractionMode('tail'); setInteractionStartPos(getPointerPos(e)); const stateMap = new Map(); stateMap.set(id, {...annotations.find(a => a.id === id)}); setInitialAnnStates(stateMap); };
+        
+        const handleEditorDrop = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                const file = e.dataTransfer.files[0];
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                        const { x, y } = getPointerPos(e);
+                        const newAnn = { id: generateId(), type: 'image', x, y, width: 200, height: 200, imageData: evt.target.result };
+                        saveToHistory([...annotations, newAnn]); setSelectedIds(new Set([newAnn.id])); setTool('select');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+        };
+
         const renderAnnotation = (ann, isPreview = false) => {
            const isSelected = !isPreview && selectedIds.has(ann.id);
            let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
@@ -775,7 +757,6 @@
                if (ann.type === 'circle') return <div style={{ width: '100%', height: '100%', border: `4px solid ${ann.color}`, borderRadius: '50%' }} />;
                if (ann.type === 'cross') return <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="0" y1="0" x2="100" y2="100" stroke={ann.color} strokeWidth="4" vectorEffect="non-scaling-stroke"/><line x1="100" y1="0" x2="0" y2="100" stroke={ann.color} strokeWidth="4" vectorEffect="non-scaling-stroke"/></svg>;
                if (ann.type === 'image') return <img src={ann.imageData} className="w-full h-full object-contain" draggable={false} />;
-               if (ann.type === 'highlight') return <div style={{ width: '100%', height: '100%', backgroundColor: ann.color, opacity: 0.3 }} />;
                if (ann.type === 'rect') return <div style={{ width: '100%', height: '100%', border: `4px solid ${ann.color}` }} />;
                if (ann.type === 'filledRect') return <div style={{ width: '100%', height: '100%', backgroundColor: ann.color }} />;
                return null;
@@ -800,11 +781,10 @@
                  <button onClick={undo} disabled={history.length === 0} className={`p-2 rounded ${history.length===0 ? 'text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}><Undo size={20} /></button>
                  <button onClick={redo} disabled={redoStack.length === 0} className={`p-2 rounded ${redoStack.length===0 ? 'text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}><Redo size={20} /></button>
               </div>
-              {/* Toolbars simplified */}
+              
               <div className="flex items-center space-x-2">
                  <button onClick={() => selectTool('select')} className={`p-2 rounded ${tool === 'select' ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`} title="移動・選択"><Move size={20} /></button>
-                 {/* ... other tools ... */}
-                  <div className="relative" ref={textMenuRef}>
+                 <div className="relative" ref={textMenuRef}>
                     <button onClick={() => { setShowTextMenu(!showTextMenu); setShowShapeMenu(false); }} className={`p-2 rounded flex items-center ${['text','callout','calloutCircle'].includes(tool) ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`} title="テキスト追加"><Type size={20} /><ChevronDown size={14} className="ml-1"/></button>
                     {showTextMenu && (
                         <div className="absolute top-full left-0 mt-1 w-56 bg-white border rounded shadow-lg z-50 p-1">
@@ -814,7 +794,6 @@
                         </div>
                     )}
                  </div>
-                 <button onClick={() => selectTool('highlight')} className={`p-2 rounded ${tool === 'highlight' ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`} title="マーカー"><Highlighter size={20} /></button>
                  <div className="relative" ref={shapeMenuRef}>
                     <button onClick={() => { setShowShapeMenu(!showShapeMenu); setShowTextMenu(false); }} className={`p-2 rounded flex items-center ${['rect','filledRect','circle','cross','arrow'].includes(tool) ? 'bg-brand-100 text-brand-600' : 'hover:bg-gray-100'}`} title="図形追加"><Shapes size={20} /><ChevronDown size={14} className="ml-1"/></button>
                     {showShapeMenu && (
@@ -858,19 +837,20 @@
                       onMouseDown={handleMouseDown}
                       onMouseMove={handleMouseMove}
                       onMouseUp={handleMouseUp}
+                      onDragStart={(e) => e.preventDefault()}
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} 
+                      onDrop={handleEditorDrop} 
                    >
                        <img ref={imgRef} src={imageSrc} className="w-full h-full pointer-events-none select-none" alt="" draggable="false" onDragStart={(e) => e.preventDefault()} />
-                       <div className="textLayer" style={{ pointerEvents: tool === 'select' ? 'auto' : 'none' }}>
-                           {textContent?.items?.map((item, i) => (
-                             <span key={i} style={{ left: `${item.transform[4]}px`, top: `${page.originalHeight - item.transform[5] - item.height}px`, fontSize: `${item.height}px`, fontFamily: item.fontName, width: `${item.width}px`, height: `${item.height}px` }}>{item.str}</span>
+                       <div className="textLayer" style={{ pointerEvents: 'none' }}>
+                           {/* Text selection disabled when drawing to prevent issues */}
+                           {tool === 'select' && textContent?.items?.map((item, i) => (
+                             <span key={i} style={{ left: `${item.transform[4]}px`, top: `${page.originalHeight - item.transform[5] - item.height}px`, fontSize: `${item.height}px`, fontFamily: item.fontName, width: `${item.width}px`, height: `${item.height}px`, pointerEvents:'auto' }}>{item.str}</span>
                            ))}
                        </div>
                        {annotations.map(ann => renderAnnotation(ann))}
                        {currentAnnotation && renderAnnotation(currentAnnotation, true)}
-                       {selectionBox && ( <div className="absolute border-2 border-brand-500 bg-brand-500/20 pointer-events-none z-50" style={{ left: selectionBox.x, top: selectionBox.y, width: selectionBox.w, height: selectionBox.h }} /> )}
-                       {textSelection && ( <button onClick={(e) => { e.stopPropagation(); applyTextHighlight(); }} className="absolute bg-yellow-400 hover:bg-yellow-500 text-black text-xs px-2 py-1 rounded shadow-lg flex items-center z-50 animate-bounce-in" style={{ left: textSelection.x + textSelection.width/2, top: textSelection.y - 40, transform: 'translateX(-50%)' }} > <Highlighter size={12} className="mr-1"/> マーカーを引く </button> )}
+                       {selectionBox && ( <div className="absolute border-2 border-brand-500 border-dashed bg-brand-500/10 pointer-events-none z-50" style={{ left: selectionBox.x, top: selectionBox.y, width: selectionBox.w, height: selectionBox.h }} /> )}
                        {!imageSrc && ( <div className="absolute inset-0 flex items-center justify-center bg-gray-50 bg-opacity-90 z-40 cursor-pointer hover:bg-gray-100" onClick={() => fileInputRef.current?.click()} > <div className="text-center text-gray-400"> <ImageIcon size={48} className="mx-auto mb-2 opacity-50"/> <p>画像をドロップ または クリックして追加</p> </div> </div> )}
                    </div>
                </div>
@@ -910,432 +890,493 @@
       const App = () => {
         const [pages, setPages] = useState([]);
         const [sources, setSources] = useState(new Map());
-        const [pageHistory, setPageHistory] = useState([]); 
-        const [editorPageId, setEditorPageId] = useState(null);
-        const [viewMode, setViewMode] = useState('grid');
+        const [editingPageId, setEditingPageId] = useState(null);
+        const [editingData, setEditingData] = useState(null);
+        const [viewMode, setViewMode] = useState('grid'); // 'grid', 'stack', 'carousel', 'folder'
         const [focusedPageIndex, setFocusedPageIndex] = useState(0);
         const [selectedPageIds, setSelectedPageIds] = useState(new Set());
-        const [editorData, setEditorData] = useState(null);
-        const [isPageNumberModalOpen, setIsPageNumberModalOpen] = useState(false);
-        const [dragOverIndex, setDragOverIndex] = useState(null);
-
+        const [pageHistory, setPageHistory] = useState([]);
+        
+        // Page Numbering State
+        const [showPageNumModal, setShowPageNumModal] = useState(false);
+        const [pageNumPosition, setPageNumPosition] = useState('bottom-center');
+        
         const fileInputRef = useRef(null);
         const carouselRef = useRef(null);
 
-        const pushPageHistory = (newPages) => {
-             setPageHistory(prev => [...prev.slice(-10), pages]); 
-             setPages(newPages);
-        };
-        const handleUndo = () => {
-             if (pageHistory.length === 0) return;
-             const previous = pageHistory[pageHistory.length - 1];
-             setPages(previous);
-             setPageHistory(prev => prev.slice(0, -1));
-        };
-
-        useEffect(() => {
-           if (carouselRef.current && viewMode === 'carousel') {
-               const item = carouselRef.current.children[focusedPageIndex];
-               if (item) {
-                   item.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-               }
-           }
-        }, [focusedPageIndex, viewMode]);
-
-        useEffect(() => {
-           const handleKeyDown = (e) => {
-              if (editorPageId) return; 
-              if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-                  setFocusedPageIndex(prev => Math.min(pages.length - 1, prev + 1));
-              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-                  setFocusedPageIndex(prev => Math.max(0, prev - 1));
-              }
-           };
-           window.addEventListener('keydown', handleKeyDown);
-           return () => window.removeEventListener('keydown', handleKeyDown);
-        }, [pages.length, editorPageId]);
-
+        // Group Pages by Source
         const groupedPages = useMemo(() => {
-            const groups = [];
-            let currentGroup = null;
-            pages.forEach((page) => {
-                if (!currentGroup || currentGroup.sourcePdfId !== page.sourcePdfId) {
-                    currentGroup = { sourcePdfId: page.sourcePdfId, pages: [] };
-                    groups.push(currentGroup);
-                }
-                currentGroup.pages.push(page);
-            });
-            return groups;
+           const groups = new Map();
+           pages.forEach(p => {
+               if (!groups.has(p.sourcePdfId)) groups.set(p.sourcePdfId, []);
+               groups.get(p.sourcePdfId).push(p);
+           });
+           return Array.from(groups.values());
         }, [pages]);
+
+        const pushPageHistory = () => {
+             setPageHistory(prev => [...prev.slice(-19), JSON.stringify(pages)]);
+        };
+        const undoPages = () => {
+             if (pageHistory.length === 0) return;
+             const prev = JSON.parse(pageHistory[pageHistory.length - 1]);
+             setPageHistory(prevH => prevH.slice(0, -1));
+             setPages(prev);
+        };
 
         const handleFileUpload = async (e) => {
           const files = Array.from(e.target.files);
           if (files.length === 0) return;
+          pushPageHistory();
           const newSources = new Map(sources);
-          let newPages = [];
+          let newPages = [...pages];
+
           for (const file of files) {
-             try {
-                const { source, pages: loadedPages } = await loadPDF(file);
-                newSources.set(source.id, source);
-                newPages = [...newPages, ...loadedPages];
-             } catch (err) { console.error(err); alert(`ファイルの読み込みに失敗しました: ${file.name}`); }
+            try {
+              const { source, pages: loadedPages } = await loadPDF(file);
+              newSources.set(source.id, source);
+              newPages = [...newPages, ...loadedPages];
+            } catch (err) {
+              console.error(err);
+              alert(`${file.name} の読み込みに失敗しました`);
+            }
           }
           setSources(newSources);
-          pushPageHistory([...pages, ...newPages]);
+          setPages(newPages);
         };
 
-        const openEditor = async (pageId) => {
-            const page = pages.find(p => p.id === pageId);
-            if (!page) return;
-            const source = sources.get(page.sourcePdfId);
-            if (!source) return;
-            const highRes = await renderHighResPage(page, source);
-            setEditorData({ page, imageSrc: highRes.dataUrl, textContent: highRes.textContent, viewportInfo: highRes.viewport });
-            setEditorPageId(pageId);
+        const openEditor = async (page) => {
+           const source = sources.get(page.sourcePdfId);
+           if (!source) return;
+           const { dataUrl, textContent, viewport } = await renderHighResPage(page, source);
+           setEditingData({ imageSrc: dataUrl, textContent, viewportInfo: viewport });
+           setEditingPageId(page.id);
         };
 
-        const closeEditor = () => { setEditorPageId(null); setEditorData(null); };
-        const saveEditor = (newAnnotations) => {
-            pushPageHistory(pages.map(p => p.id === editorPageId ? { ...p, annotations: newAnnotations } : p));
-            closeEditor();
+        const saveAnnotations = (newAnns) => {
+           pushPageHistory();
+           setPages(pages.map(p => p.id === editingPageId ? { ...p, annotations: newAnns } : p));
+           setEditingPageId(null); setEditingData(null);
+        };
+
+        const deletePages = () => {
+           if (selectedPageIds.size === 0) {
+               if (viewMode === 'stack' || viewMode === 'carousel') {
+                   // Delete current focused page
+                   const target = pages[focusedPageIndex];
+                   if (target && confirm("表示中のページを削除しますか？")) {
+                       pushPageHistory();
+                       setPages(prev => prev.filter(p => p.id !== target.id));
+                       if (focusedPageIndex >= pages.length - 1) setFocusedPageIndex(Math.max(0, pages.length - 2));
+                   }
+               }
+               return;
+           }
+           if (!confirm(`${selectedPageIds.size} ページを削除してもよろしいですか？`)) return;
+           pushPageHistory();
+           setPages(pages.filter(p => !selectedPageIds.has(p.id)));
+           setSelectedPageIds(new Set());
+        };
+
+        const rotatePages = () => {
+            pushPageHistory();
+            if (selectedPageIds.size === 0) {
+                 // Rotate focused page if none selected
+                 if (viewMode === 'stack' || viewMode === 'carousel') {
+                     const targetIndex = focusedPageIndex;
+                     setPages(prev => prev.map((p, i) => i === targetIndex ? { ...p, rotation: (p.rotation + 90) % 360 } : p));
+                 }
+                 return;
+            }
+            setPages(prev => prev.map(p => selectedPageIds.has(p.id) ? { ...p, rotation: (p.rotation + 90) % 360 } : p));
+        };
+
+        const movePage = (fromIndex, toIndex) => {
+             if (fromIndex === toIndex) return;
+             pushPageHistory();
+             const newPages = [...pages];
+             const [moved] = newPages.splice(fromIndex, 1);
+             newPages.splice(toIndex, 0, moved);
+             setPages(newPages);
+             setFocusedPageIndex(toIndex);
+        };
+        
+        const moveGroup = (sourcePdfId, direction) => {
+             const groupIndex = groupedPages.findIndex(g => g[0].sourcePdfId === sourcePdfId);
+             if (groupIndex === -1) return;
+             const targetIndex = groupIndex + direction;
+             if (targetIndex < 0 || targetIndex >= groupedPages.length) return;
+             
+             pushPageHistory();
+             const newGroups = [...groupedPages];
+             const [moved] = newGroups.splice(groupIndex, 1);
+             newGroups.splice(targetIndex, 0, moved);
+             setPages(newGroups.flat());
         };
 
         const toggleSelection = (id, multi) => {
-           const newSet = new Set(multi ? selectedPageIds : []);
-           if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
-           setSelectedPageIds(newSet);
-        };
-        const selectGroup = (sourceId) => {
-            const groupPages = pages.filter(p => p.sourcePdfId === sourceId);
-            const allSelected = groupPages.every(p => selectedPageIds.has(p.id));
-            const newSet = new Set(selectedPageIds);
-            groupPages.forEach(p => { if (allSelected) newSet.delete(p.id); else newSet.add(p.id); });
+            const newSet = new Set(multi ? selectedPageIds : []);
+            if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
             setSelectedPageIds(newSet);
         };
-        const toggleSelectAll = () => {
-             if (selectedPageIds.size === pages.length && pages.length > 0) setSelectedPageIds(new Set());
+
+        const selectAll = () => {
+             if (selectedPageIds.size === pages.length) setSelectedPageIds(new Set());
              else setSelectedPageIds(new Set(pages.map(p => p.id)));
         };
 
-        const deleteSelectedPages = () => {
-            if (selectedPageIds.size === 0) return;
-            if (!confirm(`${selectedPageIds.size}ページを削除してもよろしいですか？`)) return;
-            pushPageHistory(pages.filter(p => !selectedPageIds.has(p.id)));
-            setSelectedPageIds(new Set());
-        };
-        const rotatePage = (id, angle) => {
-             pushPageHistory(pages.map(p => {
-                 if (p.id === id || (selectedPageIds.has(id) && selectedPageIds.has(p.id))) {
-                     return { ...p, rotation: (p.rotation + angle) % 360 };
-                 }
-                 return p;
-             }));
-        };
-
-        const handlePageDrop = (e, targetIndex) => {
-           e.preventDefault();
-           setDragOverIndex(null);
-           const draggedPageId = e.dataTransfer.getData('text/plain');
-           const draggedSourceId = e.dataTransfer.getData('source-group');
-
-           if (draggedSourceId && viewMode === 'folder') {
-                const sourceIndex = groupedPages.findIndex(g => g.sourcePdfId === draggedSourceId);
-                const targetGroupIndex = targetIndex; 
-                if (sourceIndex === -1 || targetGroupIndex === -1 || sourceIndex === targetGroupIndex) return;
-                const newGroups = [...groupedPages];
-                const [movedGroup] = newGroups.splice(sourceIndex, 1);
-                newGroups.splice(targetGroupIndex, 0, movedGroup);
-                const flattenedPages = newGroups.flatMap(g => g.pages);
-                pushPageHistory(flattenedPages);
-           } else if (draggedPageId) {
-                const sourceIndex = pages.findIndex(p => p.id === draggedPageId);
-                if (sourceIndex === -1) return;
-                const newPages = [...pages];
-                const [movedPage] = newPages.splice(sourceIndex, 1);
-                newPages.splice(targetIndex, 0, movedPage);
-                pushPageHistory(newPages);
-           }
-        };
-
-        const handleSavePDF = async () => {
-           if (pages.length === 0) return;
-           const blob = await generateFinalPDF(pages, sources);
-           if (window.showSaveFilePicker) {
-               try {
-                   const handle = await window.showSaveFilePicker({ types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }] });
-                   const writable = await handle.createWritable();
-                   await writable.write(blob);
-                   await writable.close();
-               } catch (e) { /* cancelled */ }
-           } else {
-               const name = prompt("ファイル名を入力してください", "edited.pdf");
-               if (name) download(blob, name.endsWith('.pdf') ? name : name + ".pdf", "application/pdf");
-           }
-        };
-        
-        const addPageNumbers = (position) => {
-            const newPages = pages.map((page, i) => {
-                 const existingAnns = (page.annotations || []).filter(a => !a.isPageNumber);
+        const applyPageNumbers = () => {
+            pushPageHistory();
+            // 1. Remove existing page numbers
+            const cleanedPages = pages.map(p => ({
+                ...p,
+                annotations: (p.annotations || []).filter(a => !a.isPageNumber)
+            }));
+            
+            // 2. Add new numbers if not reset
+            const newPages = cleanedPages.map((p, i) => {
+                 if (pageNumPosition === 'none') return p;
                  const text = `${i + 1}`;
                  const fontSize = 16;
                  const margin = 20;
                  let x = 0, y = 0;
-                 if (position === 'bottom-center') { x = page.originalWidth / 2 - 10; y = page.originalHeight - margin - fontSize; }
-                 else { x = page.originalWidth - margin - 30; y = page.originalHeight - margin - fontSize; }
-                 const numAnn = { id: generateId(), type: 'text', text, x, y, color: '#000000', fontSize, fontFamily: 'sans-serif', isPageNumber: true };
-                 return { ...page, annotations: [...existingAnns, numAnn] };
+                 // Calculate position based on original dimensions (unrotated)
+                 // NOTE: For better placement, we should consider rotation, but simplified here to bottom of page
+                 if (pageNumPosition === 'bottom-center') {
+                     x = p.originalWidth / 2 - (text.length * fontSize / 4);
+                     y = p.originalHeight - margin - fontSize;
+                 } else { // bottom-right
+                     x = p.originalWidth - margin - (text.length * fontSize / 2);
+                     y = p.originalHeight - margin - fontSize;
+                 }
+                 
+                 const ann = { 
+                     id: generateId(), type: 'text', text, x, y, color: '#000000', fontSize, 
+                     fontFamily: 'sans-serif', isPageNumber: true 
+                 };
+                 return { ...p, annotations: [...p.annotations, ann] };
             });
-            pushPageHistory(newPages);
-            setIsPageNumberModalOpen(false);
-        };
-        const resetPageNumbers = () => {
-             pushPageHistory(pages.map(p => ({ ...p, annotations: (p.annotations||[]).filter(a => !a.isPageNumber) })));
-             setIsPageNumberModalOpen(false);
+            setPages(newPages);
+            setShowPageNumModal(false);
         };
 
-        // Helper to render annotations on thumbnails
-        const renderThumbnailAnnotation = (ann, page) => {
-            const style = { position: 'absolute', left: `${(ann.x/page.originalWidth)*100}%`, top: `${(ann.y/page.originalHeight)*100}%` };
-            if(ann.type==='text') return <div key={ann.id} style={{...style, fontSize:`${ann.fontSize/3}px`, color:ann.color, whiteSpace:'nowrap', transform:'scale(0.3)', transformOrigin:'top left'}}>{ann.text}</div>;
-            if(ann.type==='rect') return <div key={ann.id} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, border:`2px solid ${ann.color}`}} />;
-            if(ann.type==='circle') return <div key={ann.id} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, border:`2px solid ${ann.color}`, borderRadius:'50%'}} />;
-            if(ann.type==='filledRect') return <div key={ann.id} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, background:ann.color}} />;
-            if(ann.type==='image' && ann.imageData) return <img key={ann.id} src={ann.imageData} style={{...style, width:`${(ann.width/page.originalWidth)*100}%`, height:`${(ann.height/page.originalHeight)*100}%`, objectFit:'contain'}} />;
-            return null;
+        const handleSavePDF = async () => {
+            if (pages.length === 0) return;
+            const fileName = prompt("保存するファイル名を入力してください", "merged.pdf");
+            if (!fileName) return;
+            
+            try {
+               const pdfBytes = await generateFinalPDF(pages, sources);
+               if (window.showSaveFilePicker) {
+                   const handle = await window.showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'PDF Files', accept: {'application/pdf': ['.pdf']} }] });
+                   const writable = await handle.createWritable();
+                   await writable.write(pdfBytes);
+                   await writable.close();
+               } else {
+                   download(pdfBytes, fileName, "application/pdf");
+               }
+            } catch (e) {
+               console.error(e);
+               alert("PDFの保存に失敗しました");
+            }
         };
 
-        if (editorPageId && editorData) {
-           return <AnnotationEditor {...editorData} onClose={closeEditor} onSave={saveEditor} />;
+        // Keyboard Navigation (Global)
+        useEffect(() => {
+           const handleKey = (e) => {
+               if (editingPageId) return; // handled by editor
+               if (e.target.tagName === 'INPUT') return;
+               
+               if (e.key === 'ArrowRight') setFocusedPageIndex(i => Math.min(pages.length - 1, i + 1));
+               if (e.key === 'ArrowLeft') setFocusedPageIndex(i => Math.max(0, i - 1));
+           };
+           window.addEventListener('keydown', handleKey);
+           return () => window.removeEventListener('keydown', handleKey);
+        }, [pages, editingPageId]);
+        
+        // Carousel Scroll Effect
+        useEffect(() => {
+            if (viewMode === 'carousel' && carouselRef.current) {
+                const target = carouselRef.current.children[focusedPageIndex];
+                if (target) target.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            }
+        }, [focusedPageIndex, viewMode]);
+
+        // --- RENDER THUMBNAIL HELPER ---
+        const renderThumbnailContent = (page) => {
+            const isLandscape = page.rotation % 180 !== 0;
+            const containerStyle = {
+               width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
+               display: 'flex', alignItems: 'center', justifyContent: 'center'
+            };
+            // Render Annotations on thumbnail
+            const renderMiniAnns = () => {
+                return (page.annotations || []).map(ann => {
+                    let boxX = ann.x || 0; let boxY = ann.y || 0; let boxW = ann.width || 0; let boxH = ann.height || 0;
+                    if (ann.type === 'arrow') { 
+                       const minX = Math.min(ann.x, ann.x + ann.width); const minY = Math.min(ann.y, ann.y + ann.height); 
+                       boxX = minX; boxY = minY; boxW = Math.abs(ann.width); boxH = Math.abs(ann.height);
+                    } else if (boxW < 0) { boxX += boxW; boxW = Math.abs(boxW); } if (boxH < 0) { boxY += boxH; boxH = Math.abs(boxH); }
+                    
+                    const style = {
+                        position: 'absolute',
+                        left: `${(boxX / page.originalWidth) * 100}%`, top: `${(boxY / page.originalHeight) * 100}%`,
+                        width: boxW ? `${(boxW / page.originalWidth) * 100}%` : 'auto',
+                        height: boxH ? `${(boxH / page.originalHeight) * 100}%` : 'auto',
+                        color: ann.color, fontSize: `${(ann.fontSize/page.originalWidth)*100}cqw`, // relative font size
+                        pointerEvents: 'none'
+                    };
+                    
+                    if (ann.type === 'image') return <img key={ann.id} src={ann.imageData} style={{...style, objectFit:'contain'}} />;
+                    if (ann.type === 'text') return <div key={ann.id} style={{...style, whiteSpace:'nowrap', fontSize: '10px'}}>{ann.text}</div>;
+                    if (ann.type === 'rect') return <div key={ann.id} style={{...style, border: `2px solid ${ann.color}`}} />;
+                    return null;
+                });
+            };
+
+            return (
+                 <div style={containerStyle}>
+                     <div style={{ position: 'relative', width: isLandscape ? 'auto' : '100%', height: isLandscape ? '100%' : 'auto', aspectRatio: `${page.originalWidth}/${page.originalHeight}`, transform: `rotate(${page.rotation}deg)` }}>
+                        <img src={page.thumbnailUrl} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                        <div style={{ position: 'absolute', inset: 0, transform: `rotate(${-page.rotation}deg)`, width: '100%', height: '100%' }}>
+                           {/* Simplified Annotation Overlay for Thumbnail */}
+                           {renderMiniAnns()}
+                        </div>
+                     </div>
+                 </div>
+            );
+        };
+
+        // --- SUB VIEWS ---
+        const renderGridView = () => (
+             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-4 pb-20">
+                 {pages.map((page, i) => (
+                    <div 
+                       key={page.id} 
+                       className={`relative group bg-white rounded-lg shadow-sm border-2 transition-all ${selectedPageIds.has(page.id) ? 'border-brand-500 ring-2 ring-brand-100' : 'border-gray-200 hover:border-brand-300'} ${focusedPageIndex === i ? 'ring-2 ring-brand-400' : ''}`}
+                       onClick={(e) => { if (!e.shiftKey) toggleSelection(page.id, e.ctrlKey || e.metaKey); setFocusedPageIndex(i); }}
+                       onDoubleClick={() => openEditor(page)}
+                       draggable
+                       onDragStart={(e) => { e.dataTransfer.setData('pageIndex', i); }}
+                       onDragOver={(e) => { e.preventDefault(); }}
+                       onDrop={(e) => { 
+                           e.preventDefault(); const fromIdx = Number(e.dataTransfer.getData('pageIndex')); 
+                           if (e.shiftKey) { /* Group Move Logic could be here */ } else movePage(fromIdx, i); 
+                       }}
+                    >
+                        <div className="absolute top-2 left-2 z-10" onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={selectedPageIds.has(page.id)} onChange={() => toggleSelection(page.id, true)} className="w-5 h-5 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                        </div>
+                        <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
+                             <button onClick={(e) => { e.stopPropagation(); const ids = groupedPages.find(g => g[0].sourcePdfId === page.sourcePdfId)?.map(p=>p.id); if (ids) setSelectedPageIds(prev => { const n = new Set(prev); const all = ids.every(id => n.has(id)); ids.forEach(id => all ? n.delete(id) : n.add(id)); return n; }); }} className="p-1 bg-white rounded shadow hover:bg-gray-100" title="このファイルのページを一括選択"><Folder size={14}/></button>
+                             <button onClick={(e) => { e.stopPropagation(); openEditor(page); }} className="p-1 bg-white rounded shadow hover:bg-gray-100"><Edit3 size={14}/></button>
+                        </div>
+                        
+                        <div className="aspect-[3/4] p-2 flex items-center justify-center bg-gray-50 rounded-t-lg overflow-hidden">
+                             {renderThumbnailContent(page)}
+                        </div>
+                        <div className="bg-gray-50 px-2 py-1 text-center text-xs text-gray-500 border-t rounded-b-lg">
+                             {i + 1}
+                        </div>
+                        
+                        {/* Drag Indicator (Blue Line) */}
+                        {/* CSS handles drag-over visual via classes usually, simplified here */}
+                    </div>
+                 ))}
+             </div>
+        );
+
+        const renderStackView = () => (
+             <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-gray-200 p-8 perspective-[1000px]">
+                 {pages.map((page, i) => {
+                     const offset = i - focusedPageIndex;
+                     const absOffset = Math.abs(offset);
+                     if (absOffset > 5) return null; // Don't render too far
+                     const zIndex = 100 - absOffset;
+                     const scale = Math.max(0.8, 1 - absOffset * 0.05);
+                     const translateX = offset * 40; // Dense stack
+                     const translateZ = -absOffset * 50;
+                     const opacity = Math.max(0, 1 - absOffset * 0.2);
+                     
+                     return (
+                         <div 
+                             key={page.id}
+                             className={`absolute top-1/2 left-1/2 w-[400px] max-w-[90vw] aspect-[1/1.414] bg-white shadow-2xl border transition-all duration-500 ease-out cursor-pointer`}
+                             style={{ 
+                                 zIndex, opacity,
+                                 transform: `translate(-50%, -50%) translate3d(${translateX}px, 0, ${translateZ}px) scale(${scale})`
+                             }}
+                             onClick={() => setFocusedPageIndex(i)}
+                             onDoubleClick={() => i === focusedPageIndex && openEditor(page)}
+                         >
+                             {renderThumbnailContent(page)}
+                             {i === focusedPageIndex && (
+                                 <div className="absolute bottom-4 left-0 right-0 flex justify-center space-x-4">
+                                     <button onClick={() => openEditor(page)} className="bg-brand-600 text-white px-4 py-1 rounded shadow hover:bg-brand-700">編集</button>
+                                 </div>
+                             )}
+                         </div>
+                     );
+                 })}
+             </div>
+        );
+
+        const renderCarouselView = () => (
+             <div className="flex-1 flex flex-col bg-gray-900 overflow-hidden">
+                  <div ref={carouselRef} className="flex-1 flex items-center space-x-8 px-[50vw] overflow-x-auto scrollbar-hide py-8">
+                      {pages.map((page, i) => (
+                          <div 
+                              key={page.id}
+                              className={`flex-shrink-0 relative transition-all duration-300 ${i === focusedPageIndex ? 'scale-100 opacity-100 z-10' : 'scale-90 opacity-50'}`}
+                              style={{ height: '80vh', width: 'auto', aspectRatio: `${page.originalWidth}/${page.originalHeight}` }}
+                              onClick={() => setFocusedPageIndex(i)}
+                              onDoubleClick={() => openEditor(page)}
+                          >
+                              <div className="w-full h-full bg-white shadow-lg">
+                                  {renderThumbnailContent(page)}
+                              </div>
+                              <div className="absolute bottom-2 left-0 right-0 text-center text-white bg-black/50 text-sm py-1 rounded-b">
+                                  {i + 1}
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+                  {/* Carousel Controls */}
+                  <div className="h-16 bg-gray-800 flex items-center justify-center space-x-8 text-white">
+                       <button onClick={() => setFocusedPageIndex(i => Math.max(0, i-1))}><ChevronLeft size={24}/></button>
+                       <span className="font-mono text-xl">{focusedPageIndex + 1} / {pages.length}</span>
+                       <button onClick={() => setFocusedPageIndex(i => Math.min(pages.length-1, i+1))}><ChevronRight size={24}/></button>
+                       
+                       <div className="w-px h-8 bg-gray-600 mx-4"></div>
+                       <button onClick={rotatePages} title="回転"><RotateCw size={20}/></button>
+                       <button onClick={deletePages} title="削除" className="text-red-400"><Trash2 size={20}/></button>
+                       <button onClick={() => openEditor(pages[focusedPageIndex])} title="編集" className="text-brand-400"><Edit3 size={20}/></button>
+                  </div>
+             </div>
+        );
+
+        const renderFolderView = () => (
+             <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                 {groupedPages.map((group, gIdx) => (
+                     <div key={gIdx} className="bg-white rounded-xl shadow p-4 border relative group" draggable onDragStart={(e) => e.dataTransfer.setData('groupIdx', gIdx)} onDrop={(e) => { const f = e.dataTransfer.getData('groupIdx'); if (f) moveGroup(group[0].sourcePdfId, Number(f) < gIdx ? -1 : 1); }}>
+                         <div className="flex items-center justify-between mb-2">
+                             <h3 className="font-bold text-gray-700 truncate max-w-[200px]">FILE {gIdx + 1}</h3>
+                             <span className="text-xs text-gray-500">{group.length} ページ</span>
+                         </div>
+                         <div className="h-40 relative bg-gray-100 rounded border overflow-hidden flex items-center justify-center">
+                              {/* Stack visual */}
+                              {group.slice(0,3).map((p, k) => (
+                                  <div key={k} className="absolute bg-white shadow border w-24 h-32" style={{ left: 50 + k*10 + '%', top: 50 + k*5 + '%', transform: 'translate(-50%, -50%)', zIndex: k }}>
+                                      <img src={p.thumbnailUrl} className="w-full h-full object-contain opacity-80" />
+                                  </div>
+                              ))}
+                         </div>
+                         <div className="mt-2 flex justify-end space-x-2">
+                             <button onClick={() => { setSelectedPageIds(prev => { const n = new Set(prev); group.forEach(p => n.add(p.id)); return n; }); }} className="text-sm text-brand-600 hover:underline">全選択</button>
+                         </div>
+                     </div>
+                 ))}
+             </div>
+        );
+
+        // --- MAIN RENDER ---
+        if (editingData && editingPageId) {
+           const page = pages.find(p => p.id === editingPageId);
+           return <AnnotationEditor page={page} {...editingData} onClose={() => { setEditingPageId(null); setEditingData(null); }} onSave={saveAnnotations} />;
         }
 
         return (
-          <div className="min-h-screen flex flex-col bg-slate-100">
+          <div className="h-screen flex flex-col bg-gray-50 font-sans text-slate-800">
              {/* Header */}
-             <div className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm z-50">
-                <div className="flex items-center space-x-3">
-                   <div className="bg-brand-600 p-2 rounded text-white"><Edit3 size={24} /></div>
-                   <h1 className="text-xl font-bold text-slate-800">PDF Master Studio</h1>
-                </div>
+             <header className="bg-white border-b h-16 flex items-center justify-between px-6 shadow-sm z-40">
                 <div className="flex items-center space-x-4">
-                   <div className="flex bg-slate-100 rounded p-1">
-                      <button onClick={() => setViewMode('grid')} className={`p-2 rounded ${viewMode==='grid' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="グリッド表示"><LayoutGrid size={18}/></button>
-                      <button onClick={() => setViewMode('folder')} className={`p-2 rounded ${viewMode==='folder' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="フォルダ表示"><Folder size={18}/></button>
-                      <button onClick={() => setViewMode('stack')} className={`p-2 rounded ${viewMode==='stack' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="スタック表示"><Layers size={18}/></button>
-                      <button onClick={() => setViewMode('carousel')} className={`p-2 rounded ${viewMode==='carousel' ? 'bg-white shadow text-brand-600' : 'text-slate-500'}`} title="カルーセル表示"><Columns size={18}/></button>
-                   </div>
-                   <div className="h-6 w-px bg-slate-300"></div>
-                   <button onClick={handleUndo} disabled={pageHistory.length === 0} className={`p-2 rounded hover:bg-slate-100 ${pageHistory.length===0?'text-slate-300':'text-slate-600'}`} title="元に戻す"><Undo size={20}/></button>
-                   <button onClick={() => { if(confirm("すべての作業内容を破棄してリセットしますか？")) { setPages([]); setSources(new Map()); setPageHistory([]); } }} className="p-2 hover:bg-slate-100 rounded text-slate-600" title="リセット / 新規プロジェクト"><Trash2 size={20}/></button>
+                    <div className="bg-brand-600 text-white p-2 rounded-lg"><Shapes size={24} /></div>
+                    <h1 className="text-xl font-bold text-gray-800 hidden md:block">PDF Master Studio</h1>
                 </div>
+                
+                <div className="flex items-center space-x-2 bg-gray-100 p-1 rounded-lg">
+                    <button onClick={() => setViewMode('grid')} className={`p-2 rounded ${viewMode === 'grid' ? 'bg-white shadow text-brand-600' : 'text-gray-500'}`} title="グリッド表示"><LayoutGrid size={20}/></button>
+                    <button onClick={() => setViewMode('stack')} className={`p-2 rounded ${viewMode === 'stack' ? 'bg-white shadow text-brand-600' : 'text-gray-500'}`} title="スタック表示"><Layers size={20}/></button>
+                    <button onClick={() => setViewMode('carousel')} className={`p-2 rounded ${viewMode === 'carousel' ? 'bg-white shadow text-brand-600' : 'text-gray-500'}`} title="カルーセル表示"><Columns size={20}/></button>
+                    <button onClick={() => setViewMode('folder')} className={`p-2 rounded ${viewMode === 'folder' ? 'bg-white shadow text-brand-600' : 'text-gray-500'}`} title="フォルダ表示"><Folder size={20}/></button>
+                </div>
+
                 <div className="flex items-center space-x-3">
-                   <button onClick={() => setIsPageNumberModalOpen(true)} className="flex items-center px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded text-slate-700"><Hash size={18} className="mr-2"/> ページ番号</button>
-                   <button onClick={() => fileInputRef.current.click()} className="flex items-center px-4 py-2 bg-white border border-brand-500 text-brand-600 rounded hover:bg-brand-50"><FolderPlus size={18} className="mr-2"/> ファイル追加</button>
-                   <button onClick={handleSavePDF} disabled={pages.length === 0} className="flex items-center px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 shadow-md transition-all"><FileDown size={18} className="mr-2"/> PDF保存</button>
+                    <button onClick={undoPages} disabled={pageHistory.length === 0} className={`p-2 rounded flex items-center ${pageHistory.length===0 ? 'text-gray-300' : 'hover:bg-gray-100'}`} title="元に戻す"><Undo size={20} className="mr-1"/> <span className="text-sm hidden sm:inline">戻す</span></button>
+                    <button onClick={() => setShowPageNumModal(true)} className="flex items-center space-x-1 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm bg-gray-50 border"><Hash size={16}/> <span>ページ番号</span></button>
+                    <button onClick={() => fileInputRef.current?.click()} className="flex items-center space-x-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-50 transition"><Plus size={18}/> <span>ファイル追加</span></button>
+                    <button onClick={handleSavePDF} disabled={pages.length === 0} className={`flex items-center space-x-2 px-5 py-2 rounded font-bold transition shadow-sm ${pages.length===0 ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-brand-600 text-white hover:bg-brand-700'}`}><FileDown size={20}/> <span>PDF保存</span></button>
                 </div>
-             </div>
+             </header>
 
              {/* Main Content */}
-             <div className="flex-1 overflow-auto p-8" onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) e.dataTransfer.dropEffect = 'copy'; }} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length > 0) handleFileUpload(e); }}>
+             <main className="flex-1 overflow-auto relative" 
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} 
+                  onDrop={(e) => { e.preventDefault(); handleFileUpload(e); }}
+                  onClick={(e) => { if (pages.length === 0) fileInputRef.current?.click(); }}
+             >
                 {pages.length === 0 ? (
-                   <div className="h-full flex flex-col items-center justify-center text-slate-400 border-4 border-dashed border-slate-200 rounded-xl bg-slate-50/50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => fileInputRef.current?.click()}>
-                      <Upload size={64} className="mb-4 opacity-50" />
-                      <p className="text-xl font-medium">PDF または 画像ファイルをドロップ</p>
-                      <p className="text-sm mt-2 opacity-70">クリックしてファイルを選択することもできます</p>
+                   <div className="h-full flex flex-col items-center justify-center text-gray-400 space-y-4 cursor-pointer hover:bg-gray-100/50 transition">
+                       <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center mb-4">
+                          <Upload size={48} className="text-gray-400" />
+                       </div>
+                       <p className="text-xl font-bold text-gray-500">ここにPDFをドロップ または クリックして選択</p>
+                       <p className="text-sm">JPG, PNG 画像もサポートしています</p>
                    </div>
                 ) : (
                    <>
-                     {viewMode === 'grid' && (
-                        <div className="mb-4 flex items-center">
-                            <label className="flex items-center space-x-2 cursor-pointer bg-white px-3 py-1.5 rounded border shadow-sm hover:bg-gray-50">
-                                <input type="checkbox" checked={selectedPageIds.size === pages.length && pages.length > 0} onChange={toggleSelectAll} className="w-4 h-4 text-brand-600 rounded" />
-                                <span className="text-sm font-medium">すべて選択 ({pages.length})</span>
-                            </label>
-                            {selectedPageIds.size > 0 && (
-                                <button onClick={deleteSelectedPages} className="ml-3 text-red-600 hover:text-red-700 text-sm flex items-center"><Trash2 size={16} className="mr-1"/> 選択した {selectedPageIds.size} ページを削除</button>
-                            )}
-                        </div>
-                     )}
-                     
-                     {/* View Modes Rendering */}
-                     {viewMode === 'grid' && (
-                       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 pb-20">
-                          {pages.map((page, index) => {
-                             const isSelected = selectedPageIds.has(page.id);
-                             const isFocused = focusedPageIndex === index;
-                             return (
-                               <div 
-                                 key={page.id} 
-                                 draggable 
-                                 onDragStart={(e) => { e.dataTransfer.setData('text/plain', page.id); if (e.shiftKey) e.dataTransfer.setData('source-group', page.sourcePdfId); }}
-                                 onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
-                                 onDragLeave={() => setDragOverIndex(null)}
-                                 onDrop={(e) => handlePageDrop(e, index)}
-                                 className={`relative group bg-white rounded-lg shadow-sm hover:shadow-md transition-all border-2 ${isSelected ? 'border-brand-500 bg-brand-50' : 'border-transparent'} ${isFocused ? 'ring-2 ring-brand-300' : ''}`}
-                                 onClick={() => setFocusedPageIndex(index)}
-                               >
-                                  {dragOverIndex === index && <div className="absolute -left-3 top-0 bottom-0 w-1 bg-brand-500 z-50"></div>}
-                                  <div className="absolute top-2 left-2 z-10 flex space-x-1">
-                                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelection(page.id, true)} className="w-5 h-5 rounded border-gray-300 text-brand-600 focus:ring-brand-500" onClick={(e) => e.stopPropagation()} />
-                                  </div>
-                                  <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <button onClick={(e) => { e.stopPropagation(); selectGroup(page.sourcePdfId); }} className="bg-white/90 p-1.5 rounded shadow hover:bg-brand-50 text-gray-600" title="このファイルのページをすべて選択"><Folder size={14}/></button>
-                                  </div>
-                                  
-                                  <div className="p-4 flex items-center justify-center bg-gray-50 rounded-t-lg aspect-[3/4] overflow-hidden relative">
-                                      <div style={{ 
-                                          width: (page.rotation % 180 === 0) ? '100%' : 'auto', 
-                                          height: (page.rotation % 180 === 0) ? 'auto' : '100%',
-                                          aspectRatio: (page.rotation % 180 === 0) ? `${page.originalWidth}/${page.originalHeight}` : `${page.originalHeight}/${page.originalWidth}`,
-                                          position: 'relative' 
-                                      }}>
-                                          <div className="w-full h-full relative" style={{ transform: `rotate(${page.rotation}deg)` }}>
-                                               <img src={page.thumbnailUrl} className="w-full h-full object-contain pointer-events-none" />
-                                               <div className="absolute inset-0 pointer-events-none">
-                                                  {page.annotations?.map(ann => renderThumbnailAnnotation(ann, page))}
-                                               </div>
-                                          </div>
-                                      </div>
-                                  </div>
-                                  
-                                  <div className="px-3 py-2 bg-white border-t rounded-b-lg flex items-center justify-between">
-                                      <span className="text-xs font-bold text-gray-500">{index + 1}</span>
-                                      <div className="flex space-x-1">
-                                          <button onClick={(e) => { e.stopPropagation(); rotatePage(page.id, 90); }} className="p-1 hover:bg-gray-100 rounded text-gray-500" title="回転"><RotateCw size={14}/></button>
-                                          <button onClick={(e) => { e.stopPropagation(); openEditor(page.id); }} className="p-1 hover:bg-brand-50 text-brand-600 rounded" title="編集"><Edit3 size={14}/></button>
-                                      </div>
-                                  </div>
-                               </div>
-                             );
-                          })}
-                       </div>
-                     )}
-
-                     {viewMode === 'folder' && (
-                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {groupedPages.map((group, gIndex) => {
-                                const firstPage = group.pages[0];
-                                const source = sources.get(group.sourcePdfId);
-                                return (
-                                   <div 
-                                      key={group.sourcePdfId}
-                                      draggable
-                                      onDragStart={(e) => { e.dataTransfer.setData('source-group', group.sourcePdfId); }}
-                                      onDragOver={(e) => { e.preventDefault(); }}
-                                      onDrop={(e) => handlePageDrop(e, gIndex)}
-                                      className="bg-white rounded-xl shadow p-4 border hover:shadow-md transition-shadow cursor-move relative group"
-                                   >
-                                       <div className="flex items-center space-x-2 mb-3 border-b pb-2">
-                                           <Folder size={20} className="text-brand-500" />
-                                           <span className="font-bold text-sm truncate flex-1">{source?.name || 'Unknown File'}</span>
-                                           <span className="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-500">{group.pages.length} pages</span>
-                                       </div>
-                                       <div className="relative h-48 w-full flex justify-center items-center">
-                                           {group.pages.slice(0, 5).map((p, i) => (
-                                               <div key={p.id} className="absolute shadow-md border bg-white" style={{ 
-                                                   top: i * 4, left: `calc(50% - 40px + ${i * 4}px)`, 
-                                                   width: 80, height: 110, 
-                                                   zIndex: 10 - i,
-                                                   transform: `rotate(${p.rotation}deg)` 
-                                                }}>
-                                                   <img src={p.thumbnailUrl} className="w-full h-full object-contain" />
-                                                   <div className="absolute inset-0 pointer-events-none scale-[0.3] origin-top-left">
-                                                       {p.annotations?.map(ann => renderThumbnailAnnotation(ann, p))}
-                                                   </div>
-                                               </div>
-                                           ))}
-                                       </div>
-                                   </div>
-                                )
-                            })}
-                         </div>
-                     )}
-
-                     {viewMode === 'stack' && pages.length > 0 && (
-                        <div className="h-[calc(100vh-200px)] relative flex items-center justify-center overflow-hidden preserve-3d">
-                            {pages.map((page, index) => {
-                                const offset = index - focusedPageIndex;
-                                const isActive = index === focusedPageIndex;
-                                if (Math.abs(offset) > 5) return null; 
-                                return (
-                                   <div 
-                                     key={page.id}
-                                     className="absolute bg-white shadow-2xl rounded-lg border transition-all duration-500 ease-out top-1/2 left-1/2"
-                                     style={{
-                                         width: '50vh', height: '70vh',
-                                         zIndex: 100 - Math.abs(offset),
-                                         transform: `translate(-50%, -50%) translateX(${offset * 40}px) translateY(${offset * -4}px) scale(${1 - Math.abs(offset) * 0.05})`,
-                                         opacity: 1 - Math.abs(offset) * 0.1
-                                     }}
-                                     onClick={() => setFocusedPageIndex(index)}
-                                   >
-                                       <div className="w-full h-full p-4 flex flex-col">
-                                           <div className="flex-1 overflow-hidden relative flex items-center justify-center">
-                                               <img src={page.thumbnailUrl} className="max-w-full max-h-full object-contain" style={{ transform: `rotate(${page.rotation}deg)` }} />
-                                               <div className="absolute inset-0 pointer-events-none">
-                                                  {page.annotations?.map(ann => renderThumbnailAnnotation(ann, page))}
-                                               </div>
-                                           </div>
-                                           {isActive && (
-                                               <div className="h-12 border-t mt-2 flex items-center justify-center">
-                                                   <button onClick={() => openEditor(page.id)} className="bg-brand-600 text-white px-6 py-2 rounded-full shadow hover:bg-brand-700 flex items-center animate-bounce-in"><Edit3 size={16} className="mr-2"/> 編集する</button>
-                                               </div>
-                                           )}
-                                       </div>
-                                   </div>
-                                );
-                            })}
-                            <div className="absolute bottom-4 flex items-center space-x-4 bg-white/80 backdrop-blur p-2 rounded-full shadow-lg z-[110]">
-                                <button onClick={() => setFocusedPageIndex(0)} className="p-2 hover:bg-gray-200 rounded-full"><ChevronsLeft size={20}/></button>
-                                <button onClick={() => setFocusedPageIndex(Math.max(0, focusedPageIndex-1))} className="p-2 hover:bg-gray-200 rounded-full"><ChevronLeft size={20}/></button>
-                                <span className="font-mono font-bold w-16 text-center">{focusedPageIndex + 1} / {pages.length}</span>
-                                <button onClick={() => setFocusedPageIndex(Math.min(pages.length-1, focusedPageIndex+1))} className="p-2 hover:bg-gray-200 rounded-full"><ChevronRight size={20}/></button>
-                                <button onClick={() => setFocusedPageIndex(pages.length-1)} className="p-2 hover:bg-gray-200 rounded-full"><ChevronsRight size={20}/></button>
-                            </div>
-                        </div>
-                     )}
-
-                     {viewMode === 'carousel' && (
-                        <div className="flex items-center space-x-8 overflow-x-auto h-[calc(100vh-160px)] px-[50vw] py-8 snap-x snap-mandatory" ref={carouselRef}>
-                            {pages.map((page, index) => (
-                                <div 
-                                  key={page.id} 
-                                  className={`flex-shrink-0 snap-center transition-all duration-300 relative bg-white shadow-lg rounded-xl overflow-hidden border ${focusedPageIndex === index ? 'scale-100 ring-4 ring-brand-200' : 'scale-90 opacity-70'}`}
-                                  style={{ height: '80%', width: 'auto', aspectRatio: `${page.originalWidth}/${page.originalHeight}`, maxHeight: '80vh', maxWidth: '80vw' }}
-                                  onClick={() => setFocusedPageIndex(index)}
-                                >
-                                    <div className="w-full h-full relative">
-                                        <img src={page.thumbnailUrl} className="w-full h-full object-contain" style={{ transform: `rotate(${page.rotation}deg)` }} />
-                                        <div className="absolute inset-0 pointer-events-none">
-                                            {page.annotations?.map(ann => renderThumbnailAnnotation(ann, page))}
-                                        </div>
-                                    </div>
-                                    {focusedPageIndex === index && (
-                                        <button onClick={() => openEditor(page.id)} className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-brand-600 text-white px-4 py-2 rounded-full shadow-lg hover:bg-brand-700 flex items-center"><Edit3 size={16} className="mr-2"/> 編集</button>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                     )}
+                     {viewMode === 'grid' && renderGridView()}
+                     {viewMode === 'stack' && renderStackView()}
+                     {viewMode === 'carousel' && renderCarouselView()}
+                     {viewMode === 'folder' && renderFolderView()}
                    </>
                 )}
-             </div>
+             </main>
 
-             <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="application/pdf,image/*" multiple className="hidden" />
-             
-             {isPageNumberModalOpen && (
-                 <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center">
-                     <div className="bg-white rounded-lg p-6 w-96 shadow-xl animate-bounce-in">
-                         <h3 className="text-lg font-bold mb-4 flex items-center"><Hash size={20} className="mr-2"/> ページ番号を追加</h3>
-                         <div className="space-y-3">
-                             <button onClick={() => addPageNumbers('bottom-center')} className="w-full py-3 border rounded hover:bg-brand-50 hover:border-brand-500 text-left px-4">中央下 (フッター)</button>
-                             <button onClick={() => addPageNumbers('bottom-right')} className="w-full py-3 border rounded hover:bg-brand-50 hover:border-brand-500 text-left px-4">右下</button>
-                             <div className="h-px bg-gray-100 my-2"></div>
-                             <button onClick={resetPageNumbers} className="w-full py-2 text-red-600 hover:bg-red-50 rounded">ページ番号を削除</button>
-                             <button onClick={() => setIsPageNumberModalOpen(false)} className="w-full py-2 text-gray-500 hover:bg-gray-100 rounded">キャンセル</button>
+             {/* Footer Controls (Grid/Folder Only) */}
+             {(viewMode === 'grid' || viewMode === 'folder') && pages.length > 0 && (
+                <div className="h-14 bg-white border-t flex items-center justify-between px-6 z-40">
+                    <div className="flex items-center space-x-4 text-sm text-gray-500">
+                        <label className="flex items-center space-x-2 cursor-pointer select-none">
+                            <input type="checkbox" checked={selectedPageIds.size > 0 && selectedPageIds.size === pages.length} onChange={selectAll} ref={el => { if (el) el.indeterminate = selectedPageIds.size > 0 && selectedPageIds.size < pages.length; }} className="w-4 h-4 text-brand-600 rounded border-gray-300 focus:ring-brand-500"/>
+                            <span>{selectedPageIds.size} ページ選択中</span>
+                        </label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <button onClick={rotatePages} className="flex items-center px-3 py-1.5 hover:bg-gray-100 rounded text-gray-700 disabled:opacity-50" disabled={pages.length === 0}><RotateCw size={18} className="mr-2"/> 回転</button>
+                        <button onClick={deletePages} className="flex items-center px-3 py-1.5 hover:bg-red-50 text-red-600 rounded disabled:opacity-50" disabled={selectedPageIds.size === 0 && viewMode === 'grid'}><Trash2 size={18} className="mr-2"/> 削除</button>
+                    </div>
+                </div>
+             )}
+
+             {/* Modals */}
+             {showPageNumModal && (
+                 <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4">
+                     <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6 animate-bounce-in">
+                         <h3 className="text-lg font-bold mb-4">ページ番号を追加</h3>
+                         <div className="space-y-3 mb-6">
+                             <label className="flex items-center space-x-3 p-3 border rounded cursor-pointer hover:bg-gray-50">
+                                 <input type="radio" name="pageNum" checked={pageNumPosition === 'bottom-center'} onChange={() => setPageNumPosition('bottom-center')} className="text-brand-600"/>
+                                 <span>中央下 (フッター)</span>
+                             </label>
+                             <label className="flex items-center space-x-3 p-3 border rounded cursor-pointer hover:bg-gray-50">
+                                 <input type="radio" name="pageNum" checked={pageNumPosition === 'bottom-right'} onChange={() => setPageNumPosition('bottom-right')} className="text-brand-600"/>
+                                 <span>右下</span>
+                             </label>
+                             <label className="flex items-center space-x-3 p-3 border rounded cursor-pointer hover:bg-gray-50">
+                                 <input type="radio" name="pageNum" checked={pageNumPosition === 'none'} onChange={() => setPageNumPosition('none')} className="text-brand-600"/>
+                                 <span>なし (削除)</span>
+                             </label>
+                         </div>
+                         <div className="flex justify-end space-x-2">
+                             <button onClick={() => setShowPageNumModal(false)} className="px-4 py-2 hover:bg-gray-100 rounded">キャンセル</button>
+                             <button onClick={applyPageNumbers} className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700">適用</button>
                          </div>
                      </div>
                  </div>
              )}
+
+             <input type="file" ref={fileInputRef} multiple accept="application/pdf,image/*" className="hidden" onChange={handleFileUpload} />
           </div>
         );
       };
